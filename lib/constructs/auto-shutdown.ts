@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
@@ -31,18 +32,7 @@ export class AutoShutdown extends Construct {
     const stopLambda = new lambda.Function(this, 'StopFunction', {
       runtime: lambda.Runtime.PYTHON_3_13,
       handler: 'index.handler',
-      code: lambda.Code.fromInline(`
-import boto3
-import os
-
-ec2 = boto3.client('ec2')
-INSTANCE_ID = os.environ['INSTANCE_ID']
-
-def handler(event, context):
-    print(f'Stopping instance {INSTANCE_ID} due to idle timeout')
-    ec2.stop_instances(InstanceIds=[INSTANCE_ID])
-    return {'statusCode': 200, 'body': 'Instance stopped'}
-`),
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../lambda/auto-shutdown')),
       environment: {
         INSTANCE_ID: instanceId,
       },
