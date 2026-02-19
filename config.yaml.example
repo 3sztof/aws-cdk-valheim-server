@@ -1,0 +1,101 @@
+# Valheim Server Configuration
+# Copy this file to config.yaml and edit:  make init
+# All settings for your AWS-based Valheim dedicated server
+
+server:
+  # Server display name (shown in server browser)
+  name: "MyValheimServer"
+  # World name (used for save files)
+  world: "MyWorld"
+  # Server password (min 5 characters) - stored in SSM Parameter Store
+  # Leave empty to auto-generate a random password
+  password: ""
+  # Make server visible in public server list
+  public: true
+  # Enable crossplay (Xbox/PC)
+  crossplay: true
+  # SteamID64s for server admin/ban/whitelist
+  # Find your SteamID64 at https://steamid.io
+  adminSteamIds: []
+  bannedSteamIds: []
+  permittedSteamIds: []
+
+instance:
+  # EC2 instance type
+  # t3a.large (2 vCPU, 8GB RAM) - recommended, Valheim needs 4GB+ free
+  # t3a.medium (2 vCPU, 4GB RAM) - too small, causes memory warnings
+  type: "t3a.large"
+  # Use Spot instances for cost savings (~60-70% cheaper)
+  # Risk: instance may be interrupted (rare for t3a)
+  useSpot: false
+  # Maximum spot price (USD/hour) - set to 0 for on-demand price cap
+  maxSpotPrice: 0.05
+  # EBS volume size in GB (20GB minimum - Valheim server is ~2GB, world files grow)
+  volumeSize: 20
+  # AWS region to deploy in
+  region: "eu-central-1"
+
+backup:
+  # Enable automatic backups to S3
+  enabled: true
+  # Backup schedule (cron expression, UTC)
+  # Default: every 6 hours
+  schedule: "0 */6 * * *"
+  # Number of days to retain backups
+  retentionDays: 30
+  # Backup before server shutdown
+  onShutdown: true
+
+autoShutdown:
+  # Enable automatic shutdown when server is idle
+  enabled: true
+  # CPU utilization threshold (%) - below this is considered idle
+  cpuThreshold: 5
+  # Number of 5-minute periods to wait before shutdown
+  # Default: 6 periods = 30 minutes of idle time
+  evaluationPeriods: 6
+  # Scheduled shutdown time (cron, UTC) - empty to disable
+  # Example: "0 4 * * *" = 4:00 AM UTC daily
+  scheduledShutdown: ""
+
+discord:
+  # Enable Discord notifications
+  enabled: false
+  # Discord webhook URL - store in SSM Parameter Store as SecureString
+  # Parameter name: /valheim-server/discord-webhook
+  # Set the SSM parameter with:
+  #   aws ssm put-parameter --name "/valheim-server/discord-webhook" \
+  #     --value "https://discord.com/api/webhooks/..." --type SecureString
+  webhookParameterName: "/valheim-server/discord-webhook"
+  # Notify on server start
+  notifyOnStart: true
+  # Notify on server stop
+  notifyOnStop: true
+  # Notify on backup completion
+  notifyOnBackup: true
+
+# Cost allocation tags - applied to ALL resources
+# IMPORTANT: Activate these tags in AWS Billing Console > Cost Allocation Tags
+tags:
+  Project: "valheim-server"
+  Environment: "production"
+  ManagedBy: "cdk"
+  # Owner: "your-name"
+
+budget:
+  # Enable AWS Budget alerts
+  enabled: true
+  # Monthly budget limit in USD
+  monthlyLimit: 10.00
+  # Email addresses to notify when thresholds are breached
+  alertEmails:
+    - "your-email@example.com"
+  # Alert thresholds as percentage of budget (triggers notification at each)
+  thresholds:
+    - 50
+    - 80
+    - 100
+  # Also alert on forecasted overspend
+  forecastAlert: true
+  # Forecast threshold (%) - alert if forecasted spend exceeds this % of budget
+  forecastThreshold: 100

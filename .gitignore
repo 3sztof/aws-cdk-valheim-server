@@ -1,8 +1,31 @@
+# Compiled output
 *.js
-!jest.config.js
 *.d.ts
-node_modules
+*.js.map
+!jest.config.js
 
-# CDK asset staging directory
-.cdk.staging
-cdk.out
+# Dependencies
+node_modules/
+
+# CDK
+.cdk.staging/
+cdk.out/
+cdk-nag-out/
+cdk.context.json
+
+# User config (contains passwords, Steam IDs, emails)
+config.yaml
+
+# World files (large binaries)
+worlds/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
