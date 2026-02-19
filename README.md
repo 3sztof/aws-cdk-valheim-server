@@ -184,3 +184,7 @@ aws ssm start-session --target <instance-id>
 | S3 backups | ~$0.10 |
 | API Gateway + Lambda | ~$0 (free tier) |
 | **Total** | **~$3-9/month** |
+
+## Credits
+
+The game server itself runs inside the [lloesche/valheim-server-docker](https://github.com/lloesche/valheim-server-docker) container image (Apache 2.0), which handles Valheim server lifecycle, automatic updates, backups, and Discord event hooks. This project provides the AWS infrastructure to run and manage it cost-effectively.
