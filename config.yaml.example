@@ -121,3 +121,9 @@ domain:
   # Example: "valheim" -> serves at valheim.<hostedZoneName>/valheim/server/*
   # Empty (default) -> serves at <hostedZoneName>/valheim/server/*
   subdomain: ""
+  # ARN of an existing ACM certificate for the domain.
+  # When provided, CDK imports it (read-only) and will NOT create or delete it.
+  # Strongly recommended to avoid certificate recreation on cdk destroy.
+  # Find it in the ACM console or with:
+  #   aws acm list-certificates --region <region>
+  certificateArn: ""

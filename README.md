@@ -214,9 +214,10 @@ Integrates the control API with an existing Route53 domain so you can open links
 | `hostedZoneName` | _(required)_ | Existing Route53 public hosted zone name, e.g. `example.com` |
 | `hostedZoneId` | _(optional)_ | Hosted zone ID - avoids a lookup at synth time (faster deploys) |
 | `subdomain` | _(empty)_ | Subdomain prefix. Empty = serve from the zone apex. `"valheim"` = `valheim.<zone>/valheim/server/start\|stop\|status` |
+| `certificateArn` | _(optional)_ | ARN of an existing ACM cert. When set, CDK imports it read-only and will not create or delete it on deploy/destroy |
 
 When enabled, CDK will:
-1. Provision a new ACM certificate (DNS-validated, auto-created CNAME in Route53)
+1. Provision a new ACM certificate (DNS-validated) - or import an existing one if `certificateArn` is set
 2. Create a regional API Gateway custom domain mapping the base path `valheim` to the API stage, exposing `<domain>/valheim/server/start`, `<domain>/valheim/server/stop`, and `<domain>/valheim/server/status`
 3. Add a Route53 alias A record pointing the domain at the API Gateway endpoint
 
@@ -228,6 +229,7 @@ domain:
   hostedZoneName: "example.com"
   hostedZoneId: "ZXXXXXXXXXXXXXXXXXXXXX"
   subdomain: ""
+  certificateArn: "arn:aws:acm:eu-central-1:123456789012:certificate/your-cert-id"
 ```
 
 ## Connecting
