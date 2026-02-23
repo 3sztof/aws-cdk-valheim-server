@@ -119,12 +119,12 @@ def handler(event, context):
                 logs = get_recent_logs()
                 if logs is not None:
                     status["recentLogs"] = logs
-                if CONTROL_BASE_URL:
-                    status["controlLinks"] = {
-                        "start": f"{CONTROL_BASE_URL}start",
-                        "stop": f"{CONTROL_BASE_URL}stop",
-                        "status": f"{CONTROL_BASE_URL}status",
-                    }
+            if CONTROL_BASE_URL:
+                status["controlLinks"] = {
+                    "start": f"{CONTROL_BASE_URL}start",
+                    "stop": f"{CONTROL_BASE_URL}stop",
+                    "status": f"{CONTROL_BASE_URL}status",
+                }
             return response(200, status)
 
         else:
