@@ -17,9 +17,10 @@ VPC (public subnet, no NAT gateway)
         +-- CloudWatch idle alarm --> Lambda (auto-stop)
 
 API Gateway (public REST API, no auth)
-  +-- Lambda (Python 3.13): GET /server/start
-                            GET /server/stop
-                            GET /server/status
+  +-- Lambda (Python 3.13): GET /server/start   - starts EC2, Discord notification w/ control links
+                            GET /server/stop    - stops EC2, Discord notification
+                            GET /server/status  - returns state, public IP, recent container logs, control links
+  +-- Optional: custom domain via Route53 + ACM (regional cert, no us-east-1 required)
 
 S3 Bucket
   +-- World backups with lifecycle rules (configurable retention)
@@ -55,7 +56,7 @@ make bootstrap
 make deploy
 ```
 
-After deploying, `make deploy` prints the API URL and instance ID as stack outputs.
+After deploying, `make deploy` prints the API URL and instance ID as stack outputs. Run `make share` to see all browser-clickable links, including the custom domain if configured.
 
 ## Make Targets
 
@@ -97,7 +98,7 @@ Run `make` with no arguments to see all available commands.
 | `make world-download` | Download world files to `./worlds/` |
 | `make world-upload` | Upload world files from `./worlds/` (stops server first) |
 | `make backup` | Trigger a manual backup to S3 |
-| `make share` | Print start/stop/status commands to share with friends |
+| `make share` | Print browser-clickable start/stop/status URLs (uses custom domain if deployed, falls back to raw API Gateway URL) |
 
 ## Project Structure
 
@@ -141,7 +142,7 @@ All settings live in `config.yaml` (copy from `config.yaml.example` via `make in
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `type` | `t3a.large` | EC2 instance type (2 vCPU, 8 GB RAM — minimum recommended) |
+| `type` | `t3a.large` | EC2 instance type (2 vCPU, 8 GB RAM - minimum recommended) |
 | `useSpot` | `false` | Use Spot instances for ~60-70% cost savings (rare interruptions) |
 | `maxSpotPrice` | `0.05` | Max Spot price in USD/hour (0 = on-demand price cap) |
 | `volumeSize` | `20` | EBS volume size in GB (gp3, encrypted) |
@@ -175,7 +176,7 @@ All settings live in `config.yaml` (copy from `config.yaml.example` via `make in
 | `notifyOnStop` | `true` | Notify when server stops |
 | `notifyOnBackup` | `true` | Notify on backup completion |
 
-Player join/disconnect notifications are sent automatically when Discord is enabled (via the container's log filter hook).
+Player join/disconnect notifications are sent automatically when Discord is enabled (via the container's log filter hook). When `domain.enabled: true`, start notifications also include a control links block with clickable start/stop/status URLs.
 
 Store the webhook URL in SSM before deploying with Discord enabled:
 
@@ -212,11 +213,11 @@ Integrates the control API with an existing Route53 domain so you can open links
 | `enabled` | `false` | Enable custom domain integration |
 | `hostedZoneName` | _(required)_ | Existing Route53 public hosted zone name, e.g. `example.com` |
 | `hostedZoneId` | _(optional)_ | Hosted zone ID - avoids a lookup at synth time (faster deploys) |
-| `subdomain` | _(empty)_ | Subdomain prefix. Empty = serve from the zone apex. `"valheim"` = `valheim.<zone>/valheim/server/*` |
+| `subdomain` | _(empty)_ | Subdomain prefix. Empty = serve from the zone apex. `"valheim"` = `valheim.<zone>/valheim/server/start\|stop\|status` |
 
 When enabled, CDK will:
 1. Provision a new ACM certificate (DNS-validated, auto-created CNAME in Route53)
-2. Create a regional API Gateway custom domain at `<domain>/valheim/server/*`
+2. Create a regional API Gateway custom domain mapping the base path `valheim` to the API stage, exposing `<domain>/valheim/server/start`, `<domain>/valheim/server/stop`, and `<domain>/valheim/server/status`
 3. Add a Route53 alias A record pointing the domain at the API Gateway endpoint
 
 Example config for `example.com/valheim/server/start`:
