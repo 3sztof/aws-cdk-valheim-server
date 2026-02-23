@@ -95,6 +95,7 @@ export class ServerControl extends Construct {
     this.api = new apigateway.RestApi(this, 'ControlApi', {
       restApiName: 'Valheim Server Control',
       description: 'API for controlling Valheim server',
+      endpointTypes: [apigateway.EndpointType.REGIONAL],
       deployOptions: {
         stageName: 'prod',
         accessLogDestination: new apigateway.LogGroupLogDestination(apiLogGroup),
