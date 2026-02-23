@@ -62,6 +62,9 @@ export interface DomainConfig {
   // e.g. set to "valheim" -> served at "valheim.example.com/valheim/*"
   // Leave empty (or omit) to use the apex domain directly.
   subdomain?: string;
+  // ARN of an existing ACM certificate for the domain. When provided, CDK imports
+  // it (read-only) instead of creating a new one. Avoids recreation on cdk destroy.
+  certificateArn?: string;
 }
 
 export interface ValheimConfig {

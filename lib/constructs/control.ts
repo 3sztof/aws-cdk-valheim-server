@@ -147,11 +147,14 @@ export class ServerControl extends Construct {
           privateZone: false,
         });
 
-    // Regional certificate (same region as stack - no us-east-1 cross-region requirement).
-    const certificate = new acm.Certificate(this, 'ApiCertificate', {
-      domainName: fqdn,
-      validation: acm.CertificateValidation.fromDns(hostedZone),
-    });
+    // Certificate: import existing one by ARN if provided (unmanaged - CDK will not
+    // create or delete it). Fall back to creating a new DNS-validated cert otherwise.
+    const certificate = domainCfg.certificateArn
+      ? acm.Certificate.fromCertificateArn(this, 'ApiCertificate', domainCfg.certificateArn)
+      : new acm.Certificate(this, 'ApiCertificate', {
+          domainName: fqdn,
+          validation: acm.CertificateValidation.fromDns(hostedZone),
+        });
 
     // Regional custom domain - keeps cert co-located with the API.
     const customDomain = new apigateway.DomainName(this, 'CustomDomain', {
