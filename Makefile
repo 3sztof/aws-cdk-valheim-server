@@ -93,10 +93,10 @@ diff: build
 # --- server control ---
 
 start:
-	@curl -s -X POST "$(call get_api_url)server/start" | jq .
+	@curl -s "$(call get_api_url)server/start" | jq .
 
 stop:
-	@curl -s -X POST "$(call get_api_url)server/stop" | jq .
+	@curl -s "$(call get_api_url)server/stop" | jq .
 
 status:
 	@curl -s "$(call get_api_url)server/status" | jq .
@@ -241,19 +241,19 @@ share:
 	echo "" && \
 	echo "--- Start Server ---" && \
 	echo "" && \
-	echo "  curl -X POST $${API_URL}server/start" && \
+	echo "  curl $${API_URL}server/start" && \
 	echo "" && \
-	echo "  wget -qO- --post-data= $${API_URL}server/start" && \
+	echo "  wget -qO- $${API_URL}server/start" && \
 	echo "" && \
-	echo "  Invoke-WebRequest -Method POST -Uri $${API_URL}server/start" && \
+	echo "  Invoke-WebRequest -Uri $${API_URL}server/start" && \
 	echo "" && \
 	echo "--- Stop Server ---" && \
 	echo "" && \
-	echo "  curl -X POST $${API_URL}server/stop" && \
+	echo "  curl $${API_URL}server/stop" && \
 	echo "" && \
-	echo "  wget -qO- --post-data= $${API_URL}server/stop" && \
+	echo "  wget -qO- $${API_URL}server/stop" && \
 	echo "" && \
-	echo "  Invoke-WebRequest -Method POST -Uri $${API_URL}server/stop" && \
+	echo "  Invoke-WebRequest -Uri $${API_URL}server/stop" && \
 	echo "" && \
 	echo "--- Check Status ---" && \
 	echo "" && \
