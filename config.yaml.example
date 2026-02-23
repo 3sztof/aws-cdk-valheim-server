@@ -99,3 +99,25 @@ budget:
   forecastAlert: true
   # Forecast threshold (%) - alert if forecasted spend exceeds this % of budget
   forecastThreshold: 100
+
+
+domain:
+  # Integrate the control API with an existing Route53 domain (optional).
+  # When enabled, the API will be served at:
+  #   https://<domain>/valheim/server/start|stop|status
+  # Requirements: the hosted zone must already exist in your AWS account.
+  #
+  # CDK will provision a new ACM certificate (DNS-validated) and an
+  # Route53 alias record automatically on deploy.
+  enabled: false
+  # The domain name of the existing Route53 public hosted zone.
+  # Example: "example.com"
+  hostedZoneName: ""
+  # Hosted zone ID - providing this avoids a runtime lookup and speeds up synth.
+  # Find it in the Route53 console or with:
+  #   aws route53 list-hosted-zones --query 'HostedZones[*].{Name:Name,Id:Id}'
+  hostedZoneId: ""
+  # Optional subdomain to create. Leave empty to serve from the apex domain.
+  # Example: "valheim" -> serves at valheim.<hostedZoneName>/valheim/server/*
+  # Empty (default) -> serves at <hostedZoneName>/valheim/server/*
+  subdomain: ""
