@@ -51,6 +51,12 @@ $$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
 	--output text 2>/dev/null)
 endef
 
+define get_custom_domain_url
+$$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
+	--query 'Stacks[0].Outputs[?OutputKey==`ControlCustomDomainUrl`].OutputValue' \
+	--output text 2>/dev/null)
+endef
+
 # --- setup ---
 
 init:
@@ -231,37 +237,48 @@ backup:
 
 share:
 	@API_URL=$(call get_api_url) && \
+	CUSTOM_URL=$(call get_custom_domain_url) && \
 	if [ -z "$$API_URL" ] || [ "$$API_URL" = "None" ]; then \
 		echo "Error: Stack not deployed. Run 'make deploy' first."; \
 		exit 1; \
 	fi && \
-	echo "=== Valheim Server Commands ===" && \
+	if [ -n "$$CUSTOM_URL" ] && [ "$$CUSTOM_URL" != "None" ]; then \
+		START_URL=$${CUSTOM_URL}start; \
+		STOP_URL=$${CUSTOM_URL}stop; \
+		STATUS_URL=$${CUSTOM_URL}status; \
+	else \
+		START_URL=$${API_URL}server/start; \
+		STOP_URL=$${API_URL}server/stop; \
+		STATUS_URL=$${API_URL}server/status; \
+	fi && \
+	echo "=== Valheim Server Links ===" && \
 	echo "" && \
-	echo "Share these with your friends so they can control the server." && \
+	echo "Just open these links in a browser - no curl or wget needed!" && \
+	echo "The commands below are optional, for scripting only." && \
 	echo "" && \
 	echo "--- Start Server ---" && \
 	echo "" && \
-	echo "  curl $${API_URL}server/start" && \
+	echo "  Browser: $${START_URL}" && \
 	echo "" && \
-	echo "  wget -qO- $${API_URL}server/start" && \
-	echo "" && \
-	echo "  Invoke-WebRequest -Uri $${API_URL}server/start" && \
+	echo "  curl $${START_URL}" && \
+	echo "  wget -qO- $${START_URL}" && \
+	echo "  Invoke-WebRequest -Uri $${START_URL}" && \
 	echo "" && \
 	echo "--- Stop Server ---" && \
 	echo "" && \
-	echo "  curl $${API_URL}server/stop" && \
+	echo "  Browser: $${STOP_URL}" && \
 	echo "" && \
-	echo "  wget -qO- $${API_URL}server/stop" && \
-	echo "" && \
-	echo "  Invoke-WebRequest -Uri $${API_URL}server/stop" && \
+	echo "  curl $${STOP_URL}" && \
+	echo "  wget -qO- $${STOP_URL}" && \
+	echo "  Invoke-WebRequest -Uri $${STOP_URL}" && \
 	echo "" && \
 	echo "--- Check Status ---" && \
 	echo "" && \
-	echo "  curl $${API_URL}server/status" && \
+	echo "  Browser: $${STATUS_URL}" && \
 	echo "" && \
-	echo "  wget -qO- $${API_URL}server/status" && \
-	echo "" && \
-	echo "  Invoke-WebRequest -Uri $${API_URL}server/status"
+	echo "  curl $${STATUS_URL}" && \
+	echo "  wget -qO- $${STATUS_URL}" && \
+	echo "  Invoke-WebRequest -Uri $${STATUS_URL}"
 
 clean:
 	rm -rf cdk.out cdk-nag-out lib/**/*.js lib/**/*.d.ts bin/*.js bin/*.d.ts
