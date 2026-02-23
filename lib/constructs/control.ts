@@ -4,6 +4,9 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
 import { ValheimConfig } from '../config';
@@ -48,6 +51,19 @@ export class ServerControl extends Construct {
       resources: ['*'],
     }));
 
+    this.controlFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ssm:SendCommand'],
+      resources: [
+        `arn:aws:ec2:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:instance/${instanceId}`,
+        `arn:aws:ssm:${cdk.Stack.of(this).region}::document/AWS-RunShellScript`,
+      ],
+    }));
+
+    this.controlFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ssm:GetCommandInvocation'],
+      resources: ['*'],
+    }));
+
     if (config.discord.enabled) {
       this.controlFunction.addToRolePolicy(new iam.PolicyStatement({
         actions: ['ssm:GetParameter'],
@@ -61,7 +77,7 @@ export class ServerControl extends Construct {
       { id: 'AwsSolutions-IAM4', reason: 'Lambda basic execution role is required for CloudWatch Logs', appliesTo: [
         'Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole',
       ]},
-      { id: 'AwsSolutions-IAM5', reason: 'ec2:DescribeInstances requires wildcard resource', appliesTo: ['Resource::*'] },
+      { id: 'AwsSolutions-IAM5', reason: 'ec2:DescribeInstances and ssm:GetCommandInvocation require wildcard resource', appliesTo: ['Resource::*'] },
       { id: 'AwsSolutions-L1', reason: 'PYTHON_3_13 is the latest available runtime; cdk-nag may not recognize it yet' },
     ], true);
 
@@ -83,10 +99,10 @@ export class ServerControl extends Construct {
 
     const serverResource = this.api.root.addResource('server');
     
-    serverResource.addResource('start').addMethod('POST', 
+    serverResource.addResource('start').addMethod('GET', 
       new apigateway.LambdaIntegration(this.controlFunction));
     
-    serverResource.addResource('stop').addMethod('POST',
+    serverResource.addResource('stop').addMethod('GET',
       new apigateway.LambdaIntegration(this.controlFunction));
     
     serverResource.addResource('status').addMethod('GET',
@@ -102,6 +118,64 @@ export class ServerControl extends Construct {
     new cdk.CfnOutput(this, 'ApiUrl', {
       value: this.api.url,
       description: 'Server control API URL',
+    });
+
+    if (config.domain?.enabled) {
+      this.setupCustomDomain(config);
+    }
+  }
+
+  private setupCustomDomain(config: ValheimConfig): void {
+    const domainCfg = config.domain!;
+    const fqdn = domainCfg.subdomain
+      ? `${domainCfg.subdomain}.${domainCfg.hostedZoneName}`
+      : domainCfg.hostedZoneName;
+
+    const hostedZone = domainCfg.hostedZoneId
+      ? route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
+          hostedZoneId: domainCfg.hostedZoneId,
+          zoneName: domainCfg.hostedZoneName,
+        })
+      : route53.HostedZone.fromLookup(this, 'HostedZone', {
+          domainName: domainCfg.hostedZoneName,
+          privateZone: false,
+        });
+
+    // Regional certificate (same region as stack - no us-east-1 cross-region requirement).
+    const certificate = new acm.Certificate(this, 'ApiCertificate', {
+      domainName: fqdn,
+      validation: acm.CertificateValidation.fromDns(hostedZone),
+    });
+
+    // Regional custom domain - keeps cert co-located with the API.
+    const customDomain = new apigateway.DomainName(this, 'CustomDomain', {
+      domainName: fqdn,
+      certificate,
+      endpointType: apigateway.EndpointType.REGIONAL,
+      securityPolicy: apigateway.SecurityPolicy.TLS_1_2,
+    });
+
+    // Map /valheim path prefix on the custom domain to the prod stage.
+    new apigateway.BasePathMapping(this, 'BasePathMapping', {
+      domainName: customDomain,
+      restApi: this.api,
+      stage: this.api.deploymentStage,
+      basePath: 'valheim',
+    });
+
+    // Route53 alias A record pointing the domain at the API Gateway regional endpoint.
+    new route53.ARecord(this, 'ApiAliasRecord', {
+      zone: hostedZone,
+      recordName: domainCfg.subdomain || '',
+      target: route53.RecordTarget.fromAlias(
+        new route53targets.ApiGatewayDomain(customDomain),
+      ),
+    });
+
+    const customUrl = `https://${fqdn}/valheim/server/`;
+    new cdk.CfnOutput(this, 'CustomDomainUrl', {
+      value: customUrl,
+      description: 'Custom domain URL for server control (start/stop/status)',
     });
   }
 }
