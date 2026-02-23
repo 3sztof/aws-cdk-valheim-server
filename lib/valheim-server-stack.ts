@@ -76,12 +76,12 @@ export class ValheimServerStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'StartServerCommand', {
-      value: `curl -X POST ${control.api.url}server/start`,
+      value: `curl ${control.api.url}server/start`,
       description: 'Command to start the server',
     });
 
     new cdk.CfnOutput(this, 'StopServerCommand', {
-      value: `curl -X POST ${control.api.url}server/stop`,
+      value: `curl ${control.api.url}server/stop`,
       description: 'Command to stop the server',
     });
   }
