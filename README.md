@@ -17,9 +17,9 @@ VPC (public subnet, no NAT gateway)
         +-- CloudWatch idle alarm --> Lambda (auto-stop)
 
 API Gateway (public REST API, no auth)
-  +-- Lambda (Python 3.13): POST /server/start
-                            POST /server/stop
-                            GET  /server/status
+  +-- Lambda (Python 3.13): GET /server/start
+                            GET /server/stop
+                            GET /server/status
 
 S3 Bucket
   +-- World backups with lifecycle rules (configurable retention)
@@ -202,6 +202,32 @@ aws ssm put-parameter \
 Key-value pairs applied to all AWS resources. `Project` is required and used for cost filtering in AWS Cost Explorer.
 
 After deploying, activate user-defined tags in **AWS Billing Console > Cost Allocation Tags** for them to appear in Cost Explorer (takes up to 24 hours).
+
+### Domain (optional)
+
+Integrates the control API with an existing Route53 domain so you can open links in a browser instead of running curl.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable custom domain integration |
+| `hostedZoneName` | _(required)_ | Existing Route53 public hosted zone name, e.g. `example.com` |
+| `hostedZoneId` | _(optional)_ | Hosted zone ID - avoids a lookup at synth time (faster deploys) |
+| `subdomain` | _(empty)_ | Subdomain prefix. Empty = serve from the zone apex. `"valheim"` = `valheim.<zone>/valheim/server/*` |
+
+When enabled, CDK will:
+1. Provision a new ACM certificate (DNS-validated, auto-created CNAME in Route53)
+2. Create a regional API Gateway custom domain at `<domain>/valheim/server/*`
+3. Add a Route53 alias A record pointing the domain at the API Gateway endpoint
+
+Example config for `example.com/valheim/server/start`:
+
+```yaml
+domain:
+  enabled: true
+  hostedZoneName: "example.com"
+  hostedZoneId: "ZXXXXXXXXXXXXXXXXXXXXX"
+  subdomain: ""
+```
 
 ## Connecting
 
