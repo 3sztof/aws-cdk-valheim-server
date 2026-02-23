@@ -10,6 +10,7 @@ INSTANCE_ID = os.environ["INSTANCE_ID"]
 DISCORD_WEBHOOK_PARAM = os.environ.get("DISCORD_WEBHOOK_PARAM", "")
 NOTIFY_ON_START = os.environ.get("NOTIFY_ON_START", "false") == "true"
 NOTIFY_ON_STOP = os.environ.get("NOTIFY_ON_STOP", "false") == "true"
+CONTROL_BASE_URL = os.environ.get("CONTROL_BASE_URL", "")  # e.g. https://example.com/valheim/server/
 
 LOG_LINES = 30
 SSM_LOG_TIMEOUT = 20
@@ -91,7 +92,15 @@ def handler(event, context):
         if "/start" in path and method == "GET":
             ec2.start_instances(InstanceIds=[INSTANCE_ID])
             if NOTIFY_ON_START:
-                send_discord_notification("Server is starting...", 3066993)
+                msg = "Server is starting..."
+                if CONTROL_BASE_URL:
+                    msg += (
+                        f"\n\n**Control links**"
+                        f"\nStart: {CONTROL_BASE_URL}start"
+                        f"\nStop: {CONTROL_BASE_URL}stop"
+                        f"\nStatus: {CONTROL_BASE_URL}status"
+                    )
+                send_discord_notification(msg, 3066993)
             return response(
                 200, {"message": "Server starting", "instanceId": INSTANCE_ID}
             )
@@ -110,6 +119,12 @@ def handler(event, context):
                 logs = get_recent_logs()
                 if logs is not None:
                     status["recentLogs"] = logs
+                if CONTROL_BASE_URL:
+                    status["controlLinks"] = {
+                        "start": f"{CONTROL_BASE_URL}start",
+                        "stop": f"{CONTROL_BASE_URL}stop",
+                        "status": f"{CONTROL_BASE_URL}status",
+                    }
             return response(200, status)
 
         else:
