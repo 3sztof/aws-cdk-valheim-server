@@ -52,6 +52,18 @@ export interface BudgetConfig {
   forecastThreshold: number;
 }
 
+export interface DomainConfig {
+  enabled: boolean;
+  // The Route53 hosted zone domain name, e.g. "example.com"
+  hostedZoneName: string;
+  // The Route53 hosted zone ID - optional, avoids a lookup during synth
+  hostedZoneId?: string;
+  // Optional subdomain prefix. If omitted, the API is served at the zone apex.
+  // e.g. set to "valheim" -> served at "valheim.example.com/valheim/*"
+  // Leave empty (or omit) to use the apex domain directly.
+  subdomain?: string;
+}
+
 export interface ValheimConfig {
   server: ServerConfig;
   instance: InstanceConfig;
@@ -60,6 +72,7 @@ export interface ValheimConfig {
   discord: DiscordConfig;
   tags: Record<string, string>;
   budget: BudgetConfig;
+  domain?: DomainConfig;
 }
 
 export function toEventBridgeCron(cron: string): string {
@@ -128,6 +141,12 @@ function validateConfig(config: ValheimConfig): void {
     }
     if (!config.budget.thresholds?.length) {
       throw new Error('budget.thresholds must have at least one threshold when budget is enabled');
+    }
+  }
+
+  if (config.domain?.enabled) {
+    if (!config.domain.hostedZoneName) {
+      throw new Error('domain.hostedZoneName is required when domain is enabled');
     }
   }
 }
