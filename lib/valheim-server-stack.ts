@@ -75,14 +75,27 @@ export class ValheimServerStack extends cdk.Stack {
       description: 'How to find server connection info',
     });
 
+    const startUrl = control.customDomainBaseUrl
+      ? `${control.customDomainBaseUrl}start`
+      : `${control.api.url}server/start`;
+    const stopUrl = control.customDomainBaseUrl
+      ? `${control.customDomainBaseUrl}stop`
+      : `${control.api.url}server/stop`;
+    const statusUrl = control.customDomainBaseUrl
+      ? `${control.customDomainBaseUrl}status`
+      : `${control.api.url}server/status`;
     new cdk.CfnOutput(this, 'StartServerCommand', {
-      value: `curl ${control.api.url}server/start`,
+      value: `curl ${startUrl}`,
       description: 'Command to start the server',
     });
-
     new cdk.CfnOutput(this, 'StopServerCommand', {
-      value: `curl ${control.api.url}server/stop`,
+      value: `curl ${stopUrl}`,
       description: 'Command to stop the server',
+    });
+
+    new cdk.CfnOutput(this, 'StatusServerCommand', {
+      value: `curl ${statusUrl}`,
+      description: 'Command to check server status',
     });
   }
 }

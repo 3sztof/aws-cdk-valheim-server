@@ -19,6 +19,8 @@ export interface ServerControlProps {
 export class ServerControl extends Construct {
   public readonly controlFunction: lambda.Function;
   public readonly api: apigateway.RestApi;
+  // Set when domain.enabled=true; undefined otherwise.
+  public customDomainBaseUrl: string | undefined;
 
   constructor(scope: Construct, id: string, props: ServerControlProps) {
     super(scope, id);
@@ -35,6 +37,10 @@ export class ServerControl extends Construct {
         DISCORD_WEBHOOK_PARAM: config.discord.enabled ? config.discord.webhookParameterName : '',
         NOTIFY_ON_START: config.discord.notifyOnStart ? 'true' : 'false',
         NOTIFY_ON_STOP: config.discord.notifyOnStop ? 'true' : 'false',
+        // Set after setupCustomDomain() runs; empty string when domain is not configured.
+        CONTROL_BASE_URL: config.domain?.enabled
+          ? `https://${config.domain.subdomain ? config.domain.subdomain + '.' : ''}${config.domain.hostedZoneName}/valheim/server/`
+          : '',
       },
     });
 
@@ -172,10 +178,23 @@ export class ServerControl extends Construct {
       ),
     });
 
-    const customUrl = `https://${fqdn}/valheim/server/`;
+    this.customDomainBaseUrl = `https://${fqdn}/valheim/server/`;
+
+    new cdk.CfnOutput(this, 'CustomDomainStart', {
+      value: `https://${fqdn}/valheim/server/start`,
+      description: 'Custom domain URL - start the server',
+    });
+    new cdk.CfnOutput(this, 'CustomDomainStop', {
+      value: `https://${fqdn}/valheim/server/stop`,
+      description: 'Custom domain URL - stop the server',
+    });
+    new cdk.CfnOutput(this, 'CustomDomainStatus', {
+      value: `https://${fqdn}/valheim/server/status`,
+      description: 'Custom domain URL - server status',
+    });
     new cdk.CfnOutput(this, 'CustomDomainUrl', {
-      value: customUrl,
-      description: 'Custom domain URL for server control (start/stop/status)',
+      value: this.customDomainBaseUrl,
+      description: 'Custom domain base URL for server control',
     });
   }
 }
