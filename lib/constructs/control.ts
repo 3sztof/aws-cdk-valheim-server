@@ -7,6 +7,7 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
+import { LayerVersion } from 'aws-cdk-lib/aws-lambda';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
 import { ValheimConfig } from '../config';
@@ -27,11 +28,21 @@ export class ServerControl extends Construct {
 
     const { config, instanceId } = props;
 
+    // AWS Lambda Powertools for Python - managed layer (always latest for this runtime).
+    // ARN pattern: arn:aws:lambda:{region}:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313:*
+    const powertoolsLayer = LayerVersion.fromLayerVersionArn(
+      this,
+      'PowertoolsLayer',
+      `arn:aws:lambda:${cdk.Stack.of(this).region}:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313:13`,
+    );
+
     this.controlFunction = new lambda.Function(this, 'ControlFunction', {
       runtime: lambda.Runtime.PYTHON_3_13,
       handler: 'index.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../../lambda/control')),
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(60),
+      tracing: lambda.Tracing.ACTIVE,
+      layers: [powertoolsLayer],
       environment: {
         INSTANCE_ID: instanceId,
         DISCORD_WEBHOOK_PARAM: config.discord.enabled ? config.discord.webhookParameterName : '',
@@ -41,6 +52,10 @@ export class ServerControl extends Construct {
         CONTROL_BASE_URL: config.domain?.enabled
           ? `https://${config.domain.subdomain ? config.domain.subdomain + '.' : ''}${config.domain.hostedZoneName}/valheim/server/`
           : '',
+        // Powertools configuration
+        POWERTOOLS_SERVICE_NAME: 'valheim-control',
+        POWERTOOLS_METRICS_NAMESPACE: 'ValheimServer',
+        LOG_LEVEL: 'INFO',
       },
     });
 
@@ -83,7 +98,7 @@ export class ServerControl extends Construct {
       { id: 'AwsSolutions-IAM4', reason: 'Lambda basic execution role is required for CloudWatch Logs', appliesTo: [
         'Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole',
       ]},
-      { id: 'AwsSolutions-IAM5', reason: 'ec2:DescribeInstances and ssm:GetCommandInvocation require wildcard resource', appliesTo: ['Resource::*'] },
+      { id: 'AwsSolutions-IAM5', reason: 'ec2:DescribeInstances and ssm:GetCommandInvocation require wildcard resource; X-Ray PutTraceSegments/PutTelemetryRecords require wildcard', appliesTo: ['Resource::*'] },
       { id: 'AwsSolutions-L1', reason: 'PYTHON_3_13 is the latest available runtime; cdk-nag may not recognize it yet' },
     ], true);
 
