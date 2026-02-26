@@ -2,24 +2,28 @@
 
 AWS CDK project that deploys a cost-effective Valheim dedicated server on EC2 with automatic S3 backups, idle auto-shutdown, a public REST API for server control, and optional Discord notifications.
 
+> **Disclaimer:** This project is provided as-is, without warranty of any kind. You use it at your own risk. The author is not responsible for any costs, data loss, or other issues arising from its use. Always review infrastructure changes before deploying to your AWS account.
+
 ## Architecture
 
 ```
 VPC (public subnet, no NAT gateway)
   +-- EC2 (t3a.large, Amazon Linux 2023, gp3 EBS, IMDSv2)
+        +-- Elastic IP (static public IP - survives stop/start)
         +-- Docker: lloesche/valheim-server
               +-- Automatic game server updates
               +-- Native backup scheduling (BACKUPS_CRON)
               +-- S3 backup sync (POST_BACKUP_HOOK)
               +-- Discord lifecycle hooks (server online/offline)
-              +-- Player join/disconnect notifications (log filter)
+              +-- Player join/death/raid notifications (log filter)
         +-- SSM Session Manager (no SSH required)
-        +-- CloudWatch idle alarm --> Lambda (auto-stop)
+        +-- CloudWatch idle alarm --> Lambda (auto-stop, player-presence check)
 
 API Gateway (public REST API, no auth)
-  +-- Lambda (Python 3.13): GET /server/start   - starts EC2, Discord notification w/ control links
-                            GET /server/stop    - stops EC2, Discord notification
-                            GET /server/status  - returns state, public IP, recent container logs, control links
+  +-- Lambda (Python 3.13): GET /server/start   - starts EC2, Discord notification
+                            GET /server/stop    - checks for active players, stops if idle
+                            GET /server/status  - returns state, IP, recent logs, control links
+  +-- HTML pages served to browsers; JSON returned to curl/API clients
   +-- Optional: custom domain via Route53 + ACM (regional cert, no us-east-1 required)
 
 S3 Bucket
@@ -32,10 +36,61 @@ cdk-nag (AWS Solutions security checks at synth time)
 
 ## Prerequisites
 
-- Node.js 18+
-- AWS CLI configured with credentials
-- AWS CDK CLI: `npm install -g aws-cdk`
-- Python + pip (for pre-commit hooks): `pip install pre-commit`
+### Required tools
+
+| Tool | Version | Purpose | Install |
+|------|---------|---------|---------|
+| [Node.js](https://nodejs.org/) | 18+ | Runs the CDK CLI and compiles the TypeScript infrastructure code | [nodejs.org](https://nodejs.org/en/download) |
+| [AWS CDK CLI](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html) | v2 | Synthesizes and deploys CloudFormation stacks | `npm install -g aws-cdk` |
+| [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) | v2 | Authenticates to AWS; used by Makefile helper commands | [Installation guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
+| [Python](https://www.python.org/) | 3.9+ | Required for pre-commit hooks (ruff linter) | [python.org](https://www.python.org/downloads/) |
+| [pip](https://pip.pypa.io/) | any | Installs pre-commit | bundled with Python |
+| [Git](https://git-scm.com/) | any | Version control; needed for pre-commit hooks to register | [git-scm.com](https://git-scm.com/downloads) |
+| [Make](https://www.gnu.org/software/make/) | any | Runs the Makefile shortcuts (`make deploy`, `make start`, etc.) | Pre-installed on macOS/Linux; [Windows](https://gnuwin32.sourceforge.net/packages/make.htm) |
+
+### AWS account setup
+
+You need an AWS account with credentials configured locally. The fastest path:
+
+```bash
+# Install the AWS CLI, then run:
+aws configure
+# Enter your Access Key ID, Secret Access Key, default region (e.g. eu-central-1), and output format (json)
+```
+
+If your organisation uses SSO or named profiles, set `AWS_PROFILE` before running any `make` command.
+
+The IAM user or role you deploy with needs broad permissions (EC2, S3, Lambda, API Gateway, IAM, CloudFormation, SSM, CloudWatch, Budgets). For a personal account, `AdministratorAccess` is the simplest option.
+
+### Background knowledge
+
+You do not need to be an AWS expert to use this project - the goal is that `make deploy` just works. That said, some familiarity with the following will help if you need to debug or customise things:
+
+- **AWS / IAM** - understanding that resources have permissions attached to them, and that `make destroy` will delete everything
+- **CloudFormation / CDK** - this project synthesizes a CloudFormation stack; if a deploy fails mid-way, the AWS Console > CloudFormation page is the best place to see why
+- **EC2** - the game server runs on a virtual machine; knowing the difference between *stopped* (instance off, not billed for compute) and *running* is useful
+- **S3** - world backups land in an S3 bucket; you can browse them in the AWS Console if you ever need to restore manually
+- **SSM Session Manager** - the Makefile commands (`make logs`, `make world-upload`, etc.) run shell commands on the EC2 instance over SSM without requiring SSH or an open port
+
+None of the above is strictly required to get started. The README covers every command you need.
+
+## Technology stack
+
+| Layer | Technology | Role |
+|-------|-----------|------|
+| Infrastructure-as-code | [AWS CDK v2](https://docs.aws.amazon.com/cdk/v2/guide/) (TypeScript) | Defines and deploys all AWS resources |
+| Game server runtime | [lloesche/valheim-server-docker](https://github.com/lloesche/valheim-server-docker) | Manages the Valheim dedicated server process inside Docker |
+| Compute | AWS EC2 (t3a.large, Amazon Linux 2023) | Hosts the Docker container |
+| Networking | AWS VPC, Elastic IP, Security Group | Public subnet, static IP that survives stop/start |
+| Control API | AWS API Gateway + AWS Lambda (Python 3.13) | REST endpoints for start / stop / status |
+| Observability | [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/) (Logger, Metrics, Tracer) + AWS X-Ray | Structured JSON logs, custom CloudWatch metrics, distributed tracing |
+| Auto-shutdown | AWS CloudWatch Alarm + Lambda | Stops the instance after 30 min of low CPU with player-presence check |
+| Backups | AWS S3 + Docker hook | World files backed up on schedule and on shutdown |
+| Notifications | Discord webhooks via SSM Parameter Store | Server lifecycle and in-game event alerts |
+| Custom domain | AWS Route53 + ACM + API Gateway custom domain | Optional HTTPS endpoint on your own domain |
+| Cost control | AWS Budgets | Monthly spend alerts by email |
+| Security checks | [cdk-nag](https://github.com/cdklabs/cdk-nag) | AWS Solutions security rules enforced at synth time |
+| Code quality | [ruff](https://docs.astral.sh/ruff/) + pre-commit | Python linting on every commit |
 
 ## Quick Start
 
@@ -88,22 +143,24 @@ Run `make` with no arguments to see all available commands.
 | `make start` | Start the EC2 instance (and game server) |
 | `make stop` | Stop the EC2 instance |
 | `make status` | Check instance state and public IP |
-| `make logs` | Tail Valheim container logs via SSM |
+| `make logs` | Show last 50 lines of Valheim container logs via SSM |
+| `make logs-tail` | Stream Valheim container logs live in terminal (Ctrl+C to exit) |
 
 ### World Management
 
 | Command | Description |
 |---------|-------------|
 | `make world-list` | List world files on the server |
-| `make world-download` | Download world files to `./worlds/` |
-| `make world-upload` | Upload world files from `./worlds/` (stops server first) |
+| `make world-download` | Download world files to `./.worlds/` |
+| `make world-upload` | Upload world files from `./.worlds/` (warns on name mismatch, stops server first) |
+| `make world-reset` | Delete all world files from the server (fresh start) |
+| `make world-restore` | Restore world from the latest S3 backup (stops server first) |
 | `make backup` | Trigger a manual backup to S3 |
-| `make share` | Print browser-clickable start/stop/status URLs (uses custom domain if deployed, falls back to raw API Gateway URL) |
-
+| `make share` | Print browser-clickable start/stop/status URLs |
 ## Project Structure
 
 ```
-aws-cdk-valheim-server/
+.
 +-- config.yaml.example             # Config template (copy to config.yaml)
 +-- config.yaml                     # Your settings - gitignored, never committed
 +-- Makefile                        # CLI shortcuts
@@ -113,12 +170,19 @@ aws-cdk-valheim-server/
 |   +-- config.ts                   # YAML loader, TypeScript types, validation
 |   +-- valheim-server-stack.ts     # Root stack (VPC, wiring, outputs)
 |   +-- constructs/
-|       +-- server.ts               # EC2, launch template, IAM role, security group
+|       +-- server.ts               # EC2, Elastic IP, launch template, IAM role, security group
 |       +-- backup.ts               # S3 bucket with lifecycle and access logging
 |       +-- control.ts              # API Gateway + Lambda (start/stop/status)
 |       +-- auto-shutdown.ts        # CloudWatch alarm + optional scheduled shutdown
 |       +-- budget.ts               # AWS Budgets cost alerts
 |       +-- userdata/setup.sh       # EC2 bootstrap script (Docker, Valheim container)
++-- lambda/
+|   +-- control/
+|   |   +-- index.py               # Start/stop/status handler, HTML + JSON responses
+|   |   +-- player_check.py        # Player-presence check via valheim-is-idle (SSM)
+|   +-- auto-shutdown/
+|       +-- index.py               # CloudWatch alarm handler
+|       +-- player_check.py        # Player-presence check via valheim-is-idle (SSM)
 ```
 
 ## Configuration
@@ -166,6 +230,8 @@ All settings live in `config.yaml` (copy from `config.yaml.example` via `make in
 | `evaluationPeriods` | `6` | Number of 5-minute periods before shutdown triggers (default: 30 min) |
 | `scheduledShutdown` | _(empty)_ | Fixed daily shutdown cron (e.g. `0 4 * * *` = 4:00 AM UTC) |
 
+Both the idle alarm and the `/server/stop` API endpoint run a player-presence check before stopping the instance. The check calls `valheim-is-idle` inside the container via SSM - the same script the container uses internally, which handles crossplay vs. non-crossplay automatically. If players are active, the stop is skipped and the caller receives a clear message. If the check itself fails (SSM unreachable, container not running), the stop is also skipped rather than risking disconnecting active players.
+
 ### Discord
 
 | Key | Default | Description |
@@ -176,7 +242,7 @@ All settings live in `config.yaml` (copy from `config.yaml.example` via `make in
 | `notifyOnStop` | `true` | Notify when server stops |
 | `notifyOnBackup` | `true` | Notify on backup completion |
 
-Player join/disconnect notifications are sent automatically when Discord is enabled (via the container's log filter hook). When `domain.enabled: true`, start notifications also include a control links block with clickable start/stop/status URLs.
+Player join, death, and raid notifications are sent automatically when Discord is enabled (via the container's log filter hooks). Server start notifications include the static IP and clickable control links when `domain.enabled: true`.
 
 Store the webhook URL in SSM before deploying with Discord enabled:
 
@@ -232,22 +298,24 @@ domain:
   certificateArn: "arn:aws:acm:eu-central-1:123456789012:certificate/your-cert-id"
 ```
 
-## Connecting
+The server has a **static Elastic IP** that does not change between stop/start cycles. Save this address in Valheim's "Add Server" screen and it will always work.
 
 ```bash
 make start          # Start the EC2 instance
-make status         # Get the public IP
+make status         # Confirm it is online and get the static IP
 ```
 
-Then in Valheim: **Join Game > Join IP** > `<ip>:2456`
+Then in Valheim: **Join Game > Join IP** > `<static-ip>:2456`
 
 If `server.public: true`, the server also appears in the Community server list after a few minutes (search by name).
 
 ## World Management
 
+World files are stored locally in `.worlds/` (gitignored). The file names must match `server.world` in `config.yaml` - if they don't, `make world-upload` will warn you before proceeding.
+
 ### Upload an Existing World
 
-Place your world files (`.fwl` and `.db`) in `./worlds/` — the world name must match `server.world` in `config.yaml`.
+Place your world files (`.fwl` and `.db`) in `.worlds/`. The file name (without extension) must match `server.world` in `config.yaml`.
 
 Local world files are typically found at:
 - **Windows:** `%USERPROFILE%\AppData\LocalLow\IronGate\Valheim\worlds_local\`
@@ -257,25 +325,37 @@ Local world files are typically found at:
 Then run:
 
 ```bash
-make world-upload   # Takes a backup first, stops server, uploads, restarts
+make world-upload   # Warns on name mismatch, takes a backup, stops server, uploads, restarts
 ```
+
+`world-upload` reads `server.world` from `config.yaml` and compares it against the filenames in `.worlds/`. If they don't match it shows both names and explains the fix options before asking whether to proceed.
 
 ### Download World Files
 
 ```bash
-make world-download   # Downloads world files to ./worlds/
+make world-download   # Downloads world files to ./.worlds/
 ```
 
 ### Restore from S3 Backup
 
 ```bash
-make start
-# Connect via SSM:
-aws ssm start-session --target <instance-id>
-# On the instance:
-aws s3 ls s3://<bucket>/backups/
-aws s3 cp s3://<bucket>/backups/<file>.tar.gz /tmp/
-# Stop the container, extract, restart
+make world-restore   # Finds the latest backup in S3, shows the path, stops server, restores, restarts
+```
+
+Backups are `.zip` files stored at `s3://<bucket>/backups/` by the container's `POST_BACKUP_HOOK`. `world-restore` always picks the most recent one by filename (which is timestamp-ordered). The full S3 path is shown before you confirm.
+
+### Reset to a Fresh World
+
+```bash
+make world-reset   # Stops server, deletes all world files, restarts (generates a new world)
+```
+
+Requires typing `yes` in full to confirm. Run `make backup` first if you want to preserve the current world.
+
+### Manual Backup
+
+```bash
+make backup   # Triggers the container's backup script, uploads result to S3
 ```
 
 ## Estimated Monthly Cost
@@ -286,9 +366,12 @@ Estimates based on ~20 hours/week of play in `eu-central-1`.
 |-----------|-----------|------|
 | EC2 t3a.large | ~$9/mo | ~$3/mo |
 | EBS gp3 20 GB | ~$1.60/mo | ~$1.60/mo |
+| Elastic IP | ~$0 (free while running) | ~$0 (free while running) |
 | S3 backups | ~$0.10/mo | ~$0.10/mo |
 | API Gateway + Lambda | ~$0 (free tier) | ~$0 (free tier) |
 | **Total** | **~$11/mo** | **~$5/mo** |
+
+The Elastic IP incurs a small charge (~$0.005/hr) only when the instance is stopped. With auto-shutdown enabled this is negligible.
 
 Enable Spot instances with `instance.useSpot: true` in `config.yaml` for maximum savings.
 
@@ -299,3 +382,9 @@ The game server itself runs inside the [lloesche/valheim-server-docker](https://
 ## License
 
 Copyright 2026 Krzysztof Wilczynski. Licensed under the [Apache License, Version 2.0](LICENSE).
+
+## Support the Maintainer
+
+If this project saved you time, consider buying me a coffee.
+
+[![Buy Me A Coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/3sztof)
