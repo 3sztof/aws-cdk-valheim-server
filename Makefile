@@ -1,10 +1,10 @@
 .DEFAULT_GOAL := help
 .PHONY: help init install build synth deploy destroy diff start stop status bootstrap clean \
-        world-download world-upload world-list backup logs share
+        world-download world-upload world-list world-reset world-restore backup logs logs-tail share check-aws-auth check-instance-running
 
 STACK_NAME := ValheimServerStack
 WORLDS_REMOTE := /opt/valheim/saves/worlds_local
-WORLDS_LOCAL := ./worlds
+WORLDS_LOCAL := ./.worlds
 
 help:
 	@echo "Valheim Server - AWS CDK"
@@ -24,14 +24,16 @@ help:
 	@echo "  make start          Start the game server"
 	@echo "  make stop           Stop the game server"
 	@echo "  make status         Check server state and public IP"
-	@echo "  make logs           Tail Valheim container logs"
+	@echo "  make logs           Show last 50 lines of Valheim container logs"
+	@echo "  make logs-tail      Stream Valheim container logs live (Ctrl+C to exit)"
 	@echo ""
 	@echo "World Management:"
 	@echo "  make world-list     List world files on server"
-	@echo "  make world-download Download world files to ./worlds/"
-	@echo "  make world-upload   Upload world files from ./worlds/ (stops server!)"
+	@echo "  make world-download Download world files to ./.worlds/"
+	@echo "  make world-upload   Upload world files from ./.worlds/ (stops server!)"
+	@echo "  make world-reset    Delete all world files from server (fresh start)"
+	@echo "  make world-restore  Restore world from latest S3 backup (stops server!)"
 	@echo "  make backup         Trigger a manual backup to S3"
-	@echo ""
 	@echo "Other:"
 	@echo "  make build          Compile TypeScript"
 	@echo "  make clean          Remove build artifacts"
@@ -39,6 +41,30 @@ help:
 
 # --- helpers ---
 
+check-aws-auth:
+	@aws sts get-caller-identity > /dev/null 2>&1 || ( \
+		echo ""; \
+		echo "Error: AWS credentials not found or expired."; \
+		echo ""; \
+		echo "Authenticate via the AWS CLI before running this command:"; \
+		echo "  aws sso login                      # if using AWS SSO"; \
+		echo "  aws configure                      # if using access keys"; \
+		echo "  export AWS_PROFILE=<profile>       # to switch profiles"; \
+		echo ""; \
+		exit 1 \
+	)
+
+check-instance-running: check-aws-auth
+	@STATE=$(call get_instance_state) && \
+	if [ "$$STATE" != "running" ]; then \
+		echo ""; \
+		echo "Error: EC2 instance is not running (current state: $${STATE:-unknown})."; \
+		echo ""; \
+		echo "Start the server first:  make start"; \
+		echo "Check current status:    make status"; \
+		echo ""; \
+		exit 1; \
+	fi
 define get_instance_id
 $$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
 	--query 'Stacks[0].Outputs[?contains(OutputKey,`InstanceId`)].OutputValue' \
@@ -54,6 +80,13 @@ endef
 define get_custom_domain_url
 $$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
 	--query 'Stacks[0].Outputs[?OutputKey==`ControlCustomDomainUrl`].OutputValue' \
+	--output text 2>/dev/null)
+endef
+
+define get_instance_state
+$(shell aws ec2 describe-instances \
+	--instance-ids $(call get_instance_id) \
+	--query 'Reservations[0].Instances[0].State.Name' \
 	--output text 2>/dev/null)
 endef
 
@@ -76,7 +109,7 @@ install:
 		echo "Note: Install pre-commit for secret leak detection: pip install pre-commit && make install"; \
 	fi
 
-bootstrap:
+bootstrap: check-aws-auth
 	npx cdk bootstrap
 
 # --- stack ---
@@ -84,30 +117,30 @@ bootstrap:
 build:
 	npm run build
 
-synth: build
+synth: check-aws-auth build
 	npx cdk synth
 
-deploy: build
+deploy: check-aws-auth build
 	npx cdk deploy --require-approval broadening
 
-destroy:
+destroy: check-aws-auth
 	npx cdk destroy
 
-diff: build
+diff: check-aws-auth build
 	npx cdk diff
 
 # --- server control ---
 
-start:
+start: check-aws-auth
 	@curl -s "$(call get_api_url)server/start" | jq .
 
-stop:
+stop: check-aws-auth
 	@curl -s "$(call get_api_url)server/stop" | jq .
 
-status:
+status: check-aws-auth
 	@curl -s "$(call get_api_url)server/status" | jq .
 
-logs:
+logs: check-instance-running
 	@INSTANCE_ID=$(call get_instance_id) && \
 	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
 		--document-name "AWS-RunShellScript" \
@@ -117,9 +150,16 @@ logs:
 		--command-id {} --instance-id "'"$$INSTANCE_ID"'" \
 		--query "StandardOutputContent" --output text'
 
+logs-tail: check-instance-running
+	@echo "Streaming logs (Ctrl+C to exit)..."
+	@INSTANCE_ID=$(call get_instance_id) && \
+	aws ssm start-session --target "$$INSTANCE_ID" \
+		--document-name "AWS-StartInteractiveCommand" \
+		--parameters 'command=["docker logs -f valheim 2>&1"]'
+
 # --- world management ---
 
-world-list:
+world-list: check-instance-running
 	@INSTANCE_ID=$(call get_instance_id) && \
 	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
 		--document-name "AWS-RunShellScript" \
@@ -129,7 +169,7 @@ world-list:
 		--command-id {} --instance-id "'"$$INSTANCE_ID"'" \
 		--query "StandardOutputContent" --output text'
 
-world-download:
+world-download: check-instance-running
 	@echo "Downloading world files from server..."
 	@mkdir -p $(WORLDS_LOCAL)
 	@INSTANCE_ID=$(call get_instance_id) && \
@@ -157,8 +197,10 @@ world-download:
 		echo "No world files found on server."; \
 	fi
 
-world-upload:
-	@if [ ! -d "$(WORLDS_LOCAL)" ] || [ -z "$$(ls -A $(WORLDS_LOCAL)/*.fwl 2>/dev/null)" ]; then \
+world-upload: check-instance-running
+	@CONFIGURED_WORLD=$$(grep 'world:' config.yaml | head -1 | awk '{print $$2}' | tr -d '"') && \
+	FWL_FILES=$$(ls $(WORLDS_LOCAL)/*.fwl 2>/dev/null) && \
+	if [ -z "$$FWL_FILES" ]; then \
 		echo "Error: No world files found in $(WORLDS_LOCAL)/"; \
 		echo ""; \
 		echo "Place your world files (.fwl and .db) in $(WORLDS_LOCAL)/ first."; \
@@ -171,15 +213,32 @@ world-upload:
 		echo "You need both <world>.fwl and <world>.db files."; \
 		echo "The world name must match server.world in config.yaml."; \
 		exit 1; \
-	fi
-	@echo ""
-	@echo "WARNING: This will stop the Valheim server, replace world files,"
-	@echo "         and restart it. A backup will be taken first."
-	@echo ""
-	@echo "Files to upload:"
-	@ls -lah $(WORLDS_LOCAL)/*.fwl $(WORLDS_LOCAL)/*.db 2>/dev/null || true
-	@echo ""
-	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || (echo "Aborted."; exit 1)
+	fi && \
+	LOCAL_NAMES=$$(for f in $(WORLDS_LOCAL)/*.fwl; do basename "$$f" .fwl; done | grep -v '_backup' | sort -u) && \
+	echo "" && \
+	if ! echo "$$LOCAL_NAMES" | grep -qx "$$CONFIGURED_WORLD"; then \
+		echo "WARNING: Name mismatch detected."; \
+		echo ""; \
+		echo "  Local world files : $$LOCAL_NAMES"; \
+		echo "  config.yaml world : $$CONFIGURED_WORLD"; \
+		echo ""; \
+		echo "The server loads the world named in config.yaml (\"$$CONFIGURED_WORLD\")."; \
+		echo "If the uploaded files have a different name, the server will ignore them"; \
+		echo "and generate a fresh world instead."; \
+		echo ""; \
+		echo "Fix options:"; \
+		echo "  1. Rename the files in $(WORLDS_LOCAL)/ to match $$CONFIGURED_WORLD"; \
+		echo "  2. Update server.world in config.yaml to match the file name, then redeploy"; \
+		echo ""; \
+		read -p "Upload anyway? [y/N] " confirm && [ "$$confirm" = "y" ] || (echo "Aborted."; exit 1); \
+	fi && \
+	echo "WARNING: This will stop the Valheim server, replace world files," && \
+	echo "         and restart it. A backup will be taken first." && \
+	echo "" && \
+	echo "Files to upload:" && \
+	ls -lah $(WORLDS_LOCAL)/*.fwl $(WORLDS_LOCAL)/*.db 2>/dev/null || true && \
+	echo "" && \
+	read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || (echo "Aborted."; exit 1)
 	@INSTANCE_ID=$(call get_instance_id) && \
 	echo "1/4 Taking backup..." && \
 	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
@@ -222,7 +281,73 @@ world-upload:
 	echo "" && \
 	echo "Done! World files uploaded and server restarted."
 
-backup:
+world-restore: check-instance-running
+	@echo ""
+	@echo "WARNING: This will restore world files from the latest S3 backup."
+	@echo "         The server will be stopped and restarted. Current world files"
+	@echo "         will be overwritten with the backup contents."
+	@echo ""
+	@BUCKET=$$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
+		--query 'Stacks[0].Outputs[?contains(OutputKey,`BucketName`)].OutputValue' \
+		--output text) && \
+	LATEST=$$(aws s3 ls "s3://$$BUCKET/backups/" | sort | tail -n 1 | awk '{print $$4}') && \
+	if [ -z "$$LATEST" ]; then \
+		echo "Error: No backups found in s3://$$BUCKET/backups/"; \
+		echo ""; \
+		echo "Run 'make backup' to create one first."; \
+		exit 1; \
+	fi && \
+	echo "Backup to restore: s3://$$BUCKET/backups/$$LATEST" && \
+	echo "" && \
+	read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || (echo "Aborted."; exit 1) && \
+	INSTANCE_ID=$(call get_instance_id) && \
+	echo "Invoking restore.sh on instance (stops server, restores from S3, restarts)..." && \
+	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
+		--document-name "AWS-RunShellScript" \
+		--parameters "commands=[\"/opt/valheim/scripts/restore.sh s3://$$BUCKET/backups/$$LATEST\"]" \
+		--output text --query 'Command.CommandId' | \
+	xargs -I{} sh -c 'sleep 30 && aws ssm get-command-invocation \
+		--command-id {} --instance-id "'"$$INSTANCE_ID"'" \
+		--query "StandardOutputContent" --output text' && \
+	echo "" && \
+	echo "Done. World restored from s3://$$BUCKET/backups/$$LATEST"
+
+world-reset: check-instance-running
+	@echo ""
+	@echo "WARNING: This will permanently delete all world files on the server."
+	@echo "         The server will be stopped and restarted without any world data."
+	@echo "         Run 'make backup' first if you want to preserve the current world."
+	@echo ""
+	@read -p "Type 'yes' to confirm: " confirm && [ "$$confirm" = "yes" ] || (echo "Aborted."; exit 1)
+	@INSTANCE_ID=$(call get_instance_id) && \
+	echo "1/3 Stopping Valheim container..." && \
+	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
+		--document-name "AWS-RunShellScript" \
+		--parameters 'commands=["/opt/valheim/stop.sh"]' \
+		--output text --query 'Command.CommandId' | \
+	xargs -I{} sh -c 'sleep 10 && aws ssm get-command-invocation \
+		--command-id {} --instance-id "'"$$INSTANCE_ID"'" \
+		--query "Status" --output text' && \
+	echo "2/3 Deleting all world files..." && \
+	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
+		--document-name "AWS-RunShellScript" \
+		--parameters 'commands=["rm -rf $(WORLDS_REMOTE)/* && echo DELETED"]' \
+		--output text --query 'Command.CommandId' | \
+	xargs -I{} sh -c 'sleep 5 && aws ssm get-command-invocation \
+		--command-id {} --instance-id "'"$$INSTANCE_ID"'" \
+		--query "StandardOutputContent" --output text' && \
+	echo "3/3 Starting Valheim container..." && \
+	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
+		--document-name "AWS-RunShellScript" \
+		--parameters 'commands=["/opt/valheim/start.sh"]' \
+		--output text --query 'Command.CommandId' | \
+	xargs -I{} sh -c 'sleep 10 && aws ssm get-command-invocation \
+		--command-id {} --instance-id "'"$$INSTANCE_ID"'" \
+		--query "Status" --output text' && \
+	echo "" && \
+	echo "Done. World files deleted - server will generate a fresh world on next load."
+
+backup: check-instance-running
 	@INSTANCE_ID=$(call get_instance_id) && \
 	echo "Triggering backup..." && \
 	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
@@ -235,7 +360,7 @@ backup:
 
 # --- other ---
 
-share:
+share: check-aws-auth
 	@API_URL=$(call get_api_url) && \
 	CUSTOM_URL=$(call get_custom_domain_url) && \
 	if [ -z "$$API_URL" ] || [ "$$API_URL" = "None" ]; then \
