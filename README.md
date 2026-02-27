@@ -63,6 +63,25 @@ If your organisation uses SSO or named profiles, set `AWS_PROFILE` before runnin
 
 The IAM user or role you deploy with needs broad permissions (EC2, S3, Lambda, API Gateway, IAM, CloudFormation, SSM, CloudWatch, Budgets). For a personal account, `AdministratorAccess` is the simplest option.
 
+### Dev dependencies (pre-commit)
+
+Pre-commit hooks enforce code quality on every commit. The following tools must be available on `PATH` when hooks run:
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| [Go](https://go.dev/) | Required by [gitleaks](https://github.com/gitleaks/gitleaks) (secret scanner) | [go.dev/dl](https://go.dev/dl/) or `ghcr.io/devcontainers/features/go:1` |
+| [Rust](https://www.rust-lang.org/) + Cargo | Required by checkov's `rustworkx` dependency (IaC security scanner) | [rustup.rs](https://rustup.rs/) or `ghcr.io/devcontainers/features/rust:1` |
+| [ty](https://github.com/astral-sh/ty) | Python type checker for Lambda code | `uv tool install ty` |
+| [ruff](https://docs.astral.sh/ruff/) | Python linter/formatter for Lambda code | Managed by pre-commit (no manual install needed) |
+
+If you are using the **devcontainer**, all of the above are installed automatically by `.devcontainer/setup.sh` - just rebuild the container.
+
+If you are working **outside the devcontainer**, install Go and Rust via your system package manager, then run:
+
+```bash
+make install   # installs npm deps, uv, ty, pre-commit, and registers hooks
+```
+
 ### Background knowledge
 
 You do not need to be an AWS expert to use this project - the goal is that `make deploy` just works. That said, some familiarity with the following will help if you need to debug or customise things:
