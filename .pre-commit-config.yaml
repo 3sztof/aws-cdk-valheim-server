@@ -26,3 +26,35 @@ repos:
         args: [--framework, cloudformation, --directory, cdk.out, --quiet, --compact]
         files: ^cdk\.out/
         pass_filenames: false
+
+  # Python: lint + format check
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^lambda/
+      - id: ruff-format
+        files: ^lambda/
+
+  # Python: type checking with ty
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty (Python type check)
+        entry: ty check
+        language: system
+        types: [python]
+        files: ^lambda/
+        pass_filenames: false
+        args: [lambda/control, lambda/auto-shutdown]
+
+  # TypeScript: type checking with tsc
+  - repo: local
+    hooks:
+      - id: tsc
+        name: tsc (TypeScript type check)
+        entry: npx tsc --noEmit
+        language: system
+        types_or: [ts]
+        pass_filenames: false
