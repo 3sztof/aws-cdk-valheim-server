@@ -15,6 +15,7 @@ export PERMITTEDLIST_IDS="${PERMITTED_STEAM_IDS}"
 export S3_BACKUP_BUCKET="${BACKUP_BUCKET}"
 export DISCORD_WEBHOOK_PARAM="${DISCORD_WEBHOOK_PARAM}"
 export BACKUP_CRON="${BACKUP_CRON}"
+export CONTROL_BASE_URL="${CONTROL_BASE_URL}"
 
 dnf update -y
 dnf install -y docker jq
@@ -27,14 +28,20 @@ mkdir -p /opt/valheim/saves
 mkdir -p /opt/valheim/backups
 mkdir -p /opt/valheim/scripts
 
-# Fetch Discord webhook URL from SSM (if configured)
-DISCORD_WEBHOOK_URL=""
+# Fetch Discord webhook URL from SSM at container start time (not at boot),
+# so changes to the SSM parameter take effect on next container restart.
+cat > /opt/valheim/get-discord-webhook.sh << 'GETWEBHOOK'
+#!/bin/bash
+# Reads DISCORD_WEBHOOK_PARAM from env.sh and fetches current value from SSM.
+# Returns empty string if param name is unset or SSM fetch fails.
+source /opt/valheim/env.sh 2>/dev/null || true
 if [ -n "${DISCORD_WEBHOOK_PARAM:-}" ]; then
-    DISCORD_WEBHOOK_URL=$(aws ssm get-parameter --name "$DISCORD_WEBHOOK_PARAM" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+    aws ssm get-parameter --name "$DISCORD_WEBHOOK_PARAM" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo ""
 fi
+GETWEBHOOK
+chmod +x /opt/valheim/get-discord-webhook.sh
 
-TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
-PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "unknown")
+PUBLIC_IP=${SERVER_PUBLIC_IP}
 
 # Write env file for host-level scripts (restore, etc.)
 cat > /opt/valheim/env.sh << ENVFILE
@@ -51,6 +58,7 @@ SERVER_NAME=${VALHEIM_SERVER_NAME}
 WORLD_NAME=${VALHEIM_WORLD}
 SERVER_PASS=${VALHEIM_PASSWORD}
 SERVER_PUBLIC=${VALHEIM_PUBLIC}
+CROSSPLAY=${CROSSPLAY}
 ADMINLIST_IDS=${ADMINLIST_IDS}
 BANNEDLIST_IDS=${BANNEDLIST_IDS}
 PERMITTEDLIST_IDS=${PERMITTEDLIST_IDS}
@@ -64,25 +72,27 @@ BACKUPS_IF_IDLE=true
 BACKUPS_ZIP=true
 POST_BOOTSTRAP_HOOK=apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install awscli
 POST_BACKUP_HOOK=aws s3 cp @BACKUP_FILE@ s3://${S3_BACKUP_BUCKET}/backups/
-DISCORD_WEBHOOK=${DISCORD_WEBHOOK_URL}
-POST_SERVER_LISTENING_HOOK=curl -sfSL -X POST -H "Content-Type: application/json" -d '{"username":"Valheim","embeds":[{"title":"Server Online","description":"Valheim server is ready!\\nConnect to: ${PUBLIC_IP}:2456","color":3066993}]}' "\$DISCORD_WEBHOOK" 2>/dev/null || true
-PRE_SERVER_SHUTDOWN_HOOK=curl -sfSL -X POST -H "Content-Type: application/json" -d '{"username":"Valheim","embeds":[{"title":"Server Offline","description":"Valheim server (${PUBLIC_IP}) is shutting down.","color":15158332}]}' "\$DISCORD_WEBHOOK" 2>/dev/null || true
+POST_SERVER_LISTENING_HOOK=curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"Valheim\",\"embeds\":[{\"title\":\"✅ ${SERVER_NAME} is Online\",\"description\":\"Server is ready! Connect to ${PUBLIC_IP}:2456\\n\\n▶ Start: ${CONTROL_BASE_URL}start\\n⏹ Stop: ${CONTROL_BASE_URL}stop\\n🔎 Status: ${CONTROL_BASE_URL}status\",\"color\":3066993}]}" "\$DISCORD_WEBHOOK" 2>/dev/null || true
+PRE_SERVER_SHUTDOWN_HOOK=curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"Valheim\",\"embeds\":[{\"title\":\"🔴 ${SERVER_NAME} is Offline\",\"description\":\"Server is shutting down.\\n\\n▶ Start: ${CONTROL_BASE_URL}start\",\"color\":15158332}]}" "\$DISCORD_WEBHOOK" 2>/dev/null || true
 VALHEIM_LOG_FILTER_CONTAINS_Spawned=Got character ZDOID from
-ON_VALHEIM_LOG_FILTER_CONTAINS_Spawned={ read l; if echo "\$l" | grep -q ": 0:0"; then name=\${l//*ZDOID from /}; name=\${name// :*/}; msg="\xF0\x9F\x92\x80 \$name died"; else name=\${l//*ZDOID from /}; name=\${name// :*/}; msg="\xE2\x9A\x94 \$name joined the server"; fi; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"Valheim\",\"content\":\"\$msg\"}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
+ON_VALHEIM_LOG_FILTER_CONTAINS_Spawned={ read l; if echo "\$l" | grep -q ": 0:0"; then name=\${l//*ZDOID from /}; name=\${name// :*/}; msg="💀 \$name died"; else name=\${l//*ZDOID from /}; name=\${name// :*/}; msg="⚔ \$name joined the server"; fi; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"Valheim\",\"content\":\"\$msg\"}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
 VALHEIM_LOG_FILTER_CONTAINS_Raid=Random event set:
-ON_VALHEIM_LOG_FILTER_CONTAINS_Raid={ read l; event=\${l//*Random event set:/}; event=\${event%% *}; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"Valheim\",\"embeds\":[{\"title\":\"\xF0\x9F\x9A\xA8 Raid!\",\"description\":\"Event: \$event\",\"color\":15158332}]}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
+ON_VALHEIM_LOG_FILTER_CONTAINS_Raid={ read l; event=\${l//*Random event set:/}; event=\${event%% *}; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"Valheim\",\"embeds\":[{\"title\":\"🚨 Raid!\",\"description\":\"Event: \$event\",\"color\":15158332}]}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
 ENVEOF
 
 cat > /opt/valheim/start.sh << 'STARTSH'
 #!/bin/bash
+# Fetch Discord webhook fresh from SSM so URL changes take effect without redeployment.
+DISCORD_WEBHOOK=$(/opt/valheim/get-discord-webhook.sh)
 docker rm -f valheim 2>/dev/null || true
 exec docker run -d \
   --name valheim \
   --cap-add=sys_nice \
   --stop-timeout 120 \
   --restart unless-stopped \
-  -p 2456-2457:2456-2457/udp \
+  -p 2456-2458:2456-2458/udp \
   --env-file /opt/valheim/valheim.env \
+  --env DISCORD_WEBHOOK="${DISCORD_WEBHOOK}" \
   -v /opt/valheim/server:/opt/valheim \
   -v /opt/valheim/saves:/config \
   lloesche/valheim-server:latest
