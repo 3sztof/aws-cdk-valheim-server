@@ -5,7 +5,6 @@ import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import { LayerVersion } from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
@@ -30,12 +29,56 @@ export class AutoShutdown extends Construct {
       return;
     }
 
-    // AWS Lambda Powertools for Python - managed layer (always latest for this runtime).
-    const powertoolsLayer = LayerVersion.fromLayerVersionArn(
-      this,
-      'PowertoolsLayer',
-      `arn:aws:lambda:${cdk.Stack.of(this).region}:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313:13`,
-    );
+    // Lambda layer: aws-lambda-powertools installed via uv into lambda/auto-shutdown/layer/python/.
+    // CDK local bundling runs uv at synth time; the output is zipped as the layer asset.
+    const powertoolsLayer = new lambda.LayerVersion(this, 'PowertoolsLayer', {
+      layerVersionName: 'valheim-autoshutdown-powertools',
+      description: 'aws-lambda-powertools for valheim-autoshutdown (built by uv)',
+      compatibleRuntimes: [lambda.Runtime.PYTHON_3_13],
+      compatibleArchitectures: [lambda.Architecture.X86_64],
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../lambda/auto-shutdown'), {
+        bundling: {
+          // Placeholder image - local bundler always runs first; Docker path is never used.
+          image: cdk.DockerImage.fromRegistry('public.ecr.aws/amazonlinux/amazonlinux:2023'),
+          local: {
+            tryBundle(outputDir: string): boolean {
+              try {
+                const { spawnSync } = require('child_process');
+                const fs = require('fs');
+                const os = require('os');
+                const uvWhich = spawnSync('which', ['uv'], { encoding: 'utf8' });
+                if (uvWhich.status !== 0 || !uvWhich.stdout.trim()) throw new Error('uv not found in PATH');
+                const uv = uvWhich.stdout.trim();
+                const src = path.join(__dirname, '../../lambda/auto-shutdown');
+                const exportResult = spawnSync(
+                  uv, ['export', '--frozen', '--no-dev', '--no-emit-project', '--no-hashes', '--no-annotate', '--color', 'never'],
+                  { cwd: src, encoding: 'utf8' },
+                );
+                if (exportResult.error) throw exportResult.error;
+                if (exportResult.status !== 0) throw new Error('uv export failed: ' + exportResult.stderr);
+                const reqs = exportResult.stdout.split('\n').filter((l: string) => l.trim() && !l.startsWith('#')).join('\n');
+                // Write requirements to a temp file - avoids /dev/stdin issues in ts-node subprocess.
+                const reqsFile = path.join(os.tmpdir(), 'cdk-layer-autoshutdown-reqs.txt');
+                fs.writeFileSync(reqsFile, reqs, 'utf8');
+                fs.mkdirSync(`${outputDir}/python`, { recursive: true });
+                const installResult = spawnSync(
+                  uv, ['pip', 'install', '--no-cache', '--python', '3.13', '-r', reqsFile, '--target', `${outputDir}/python`],
+                  { cwd: src, encoding: 'utf8' },
+                );
+                if (installResult.stdout) process.stdout.write(installResult.stdout);
+                if (installResult.stderr) process.stderr.write(installResult.stderr);
+                if (installResult.error) throw installResult.error;
+                if (installResult.status !== 0) throw new Error('uv pip install failed (status ' + installResult.status + ')');
+                return true;
+              } catch (_e) {
+                process.stderr.write('autoshutdown layer tryBundle error: ' + (_e as Error).message + '\n');
+                return false;
+              }
+            },
+          },
+        },
+      }),
+    });
 
     const stopLambda = new lambda.Function(this, 'StopFunction', {
       runtime: lambda.Runtime.PYTHON_3_13,
