@@ -25,7 +25,7 @@ CONTROL_BASE_URL = os.environ.get(
 )  # e.g. https://example.com/valheim/server/
 
 LOG_LINES = 30
-SSM_LOG_TIMEOUT = 20
+SSM_LOG_TIMEOUT = 30
 
 # ---------------------------------------------------------------------------
 # HTML helpers
@@ -516,7 +516,9 @@ def _handle_stop(browser):
         logger.warning(
             "Stop rejected - could not verify player count; refusing to stop to avoid kicking players"
         )
-        metrics.add_metric(name="StopRejectedCheckFailed", unit=MetricUnit.Count, value=1)
+        metrics.add_metric(
+            name="StopRejectedCheckFailed", unit=MetricUnit.Count, value=1
+        )
         if browser:
             return html_response(
                 503,
@@ -532,7 +534,9 @@ def _handle_stop(browser):
 
     if players_online:
         logger.info("Stop rejected - players are connected")
-        metrics.add_metric(name="StopRejectedPlayersActive", unit=MetricUnit.Count, value=1)
+        metrics.add_metric(
+            name="StopRejectedPlayersActive", unit=MetricUnit.Count, value=1
+        )
         if browser:
             return html_response(409, html_players_active_page())
         return json_response(409, {"error": "Players are connected"})
@@ -545,6 +549,7 @@ def _handle_stop(browser):
     if browser:
         return html_response(200, html_stop_page())
     return json_response(200, {"message": "Server stopping", "instanceId": INSTANCE_ID})
+
 
 @tracer.capture_method
 def _handle_status(browser):
