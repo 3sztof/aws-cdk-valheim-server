@@ -44,7 +44,8 @@ cdk-nag (AWS Solutions security checks at synth time)
 | [AWS CDK CLI](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html) | v2 | Synthesizes and deploys CloudFormation stacks | `npm install -g aws-cdk` |
 | [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) | v2 | Authenticates to AWS; used by Makefile helper commands | [Installation guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
 | [Python](https://www.python.org/) | 3.9+ | Required for pre-commit hooks (ruff linter) | [python.org](https://www.python.org/downloads/) |
-| [pip](https://pip.pypa.io/) | any | Installs pre-commit | bundled with Python |
+| `uv` | 0.9+ | Builds Python Lambda layer dependencies at CDK synth time | [astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) |
+| [pre-commit](https://pre-commit.com/) | any | Runs linters and type checkers on every commit | `pip install pre-commit` |
 | [Git](https://git-scm.com/) | any | Version control; needed for pre-commit hooks to register | [git-scm.com](https://git-scm.com/downloads) |
 | [Make](https://www.gnu.org/software/make/) | any | Runs the Makefile shortcuts (`make deploy`, `make start`, etc.) | Pre-installed on macOS/Linux; [Windows](https://gnuwin32.sourceforge.net/packages/make.htm) |
 
@@ -90,7 +91,7 @@ None of the above is strictly required to get started. The README covers every c
 | Custom domain | AWS Route53 + ACM + API Gateway custom domain | Optional HTTPS endpoint on your own domain |
 | Cost control | AWS Budgets | Monthly spend alerts by email |
 | Security checks | [cdk-nag](https://github.com/cdklabs/cdk-nag) | AWS Solutions security rules enforced at synth time |
-| Code quality | [ruff](https://docs.astral.sh/ruff/) + pre-commit | Python linting on every commit |
+| Code quality | [ruff](https://docs.astral.sh/ruff/) + [ty](https://github.com/astral-sh/ty) + [tsc](https://www.typescriptlang.org/) + pre-commit | Python lint/format/types and TypeScript type checking on every commit |
 
 ## Quick Start
 
@@ -122,8 +123,9 @@ Run `make` with no arguments to see all available commands.
 | Command | Description |
 |---------|-------------|
 | `make init` | Create `config.yaml` from template |
-| `make install` | Install npm dependencies and pre-commit hooks |
+| `make install` | Install npm dependencies, pre-commit hooks, and uv (if not present) |
 | `make bootstrap` | Bootstrap CDK (first time per account/region) |
+| `make layer-deps-update` | Regenerate `uv.lock` files for both Lambda layers after changing `pyproject.toml` |
 
 ### Stack
 
@@ -180,9 +182,13 @@ Run `make` with no arguments to see all available commands.
 |   +-- control/
 |   |   +-- index.py               # Start/stop/status handler, HTML + JSON responses
 |   |   +-- player_check.py        # Player-presence check via valheim-is-idle (SSM)
+|   |   +-- pyproject.toml         # uv project - layer dependencies
+|   |   +-- uv.lock                # Pinned lockfile for reproducible layer builds
 |   +-- auto-shutdown/
 |       +-- index.py               # CloudWatch alarm handler
 |       +-- player_check.py        # Player-presence check via valheim-is-idle (SSM)
+|       +-- pyproject.toml         # uv project - layer dependencies
+|       +-- uv.lock                # Pinned lockfile for reproducible layer builds
 ```
 
 ## Configuration
@@ -244,7 +250,7 @@ Both the idle alarm and the `/server/stop` API endpoint run a player-presence ch
 
 Player join, death, and raid notifications are sent automatically when Discord is enabled (via the container's log filter hooks). Server start notifications include the static IP and clickable control links when `domain.enabled: true`.
 
-Store the webhook URL in SSM before deploying with Discord enabled:
+Store the webhook URL in SSM before deploying with Discord enabled. To change the URL later, update the SSM parameter — `start.sh` fetches it fresh on every container start so no redeploy is needed:
 
 ```bash
 aws ssm put-parameter \
@@ -279,15 +285,15 @@ Integrates the control API with an existing Route53 domain so you can open links
 | `enabled` | `false` | Enable custom domain integration |
 | `hostedZoneName` | _(required)_ | Existing Route53 public hosted zone name, e.g. `example.com` |
 | `hostedZoneId` | _(optional)_ | Hosted zone ID - avoids a lookup at synth time (faster deploys) |
-| `subdomain` | _(empty)_ | Subdomain prefix. Empty = serve from the zone apex. `"valheim"` = `valheim.<zone>/valheim/server/start\|stop\|status` |
+  subdomain: "valheim"  # results in valheim.<zone>/server/start|stop|status
 | `certificateArn` | _(optional)_ | ARN of an existing ACM cert. When set, CDK imports it read-only and will not create or delete it on deploy/destroy |
 
 When enabled, CDK will:
 1. Provision a new ACM certificate (DNS-validated) - or import an existing one if `certificateArn` is set
-2. Create a regional API Gateway custom domain mapping the base path `valheim` to the API stage, exposing `<domain>/valheim/server/start`, `<domain>/valheim/server/stop`, and `<domain>/valheim/server/status`
+2. Create a regional API Gateway custom domain with no base path prefix, exposing `<domain>/server/start`, `<domain>/server/stop`, and `<domain>/server/status`
 3. Add a Route53 alias A record pointing the domain at the API Gateway endpoint
 
-Example config for `example.com/valheim/server/start`:
+Example config for `example.com/server/start`:
 
 ```yaml
 domain:

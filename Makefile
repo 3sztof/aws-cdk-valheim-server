@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 .PHONY: help init install build synth deploy destroy diff start stop status bootstrap clean \
-        world-download world-upload world-list world-reset world-restore backup logs logs-tail share check-aws-auth check-instance-running
+        world-download world-upload world-list world-reset world-restore backup logs logs-tail share \
+        check-aws-auth check-instance-running layer-deps-update
 
 STACK_NAME := ValheimServerStack
 WORLDS_REMOTE := /opt/valheim/saves/worlds_local
@@ -35,9 +36,10 @@ help:
 	@echo "  make world-restore  Restore world from latest S3 backup (stops server!)"
 	@echo "  make backup         Trigger a manual backup to S3"
 	@echo "Other:"
-	@echo "  make build          Compile TypeScript"
-	@echo "  make clean          Remove build artifacts"
-	@echo "  make share          Show commands friends can use to start/stop/check the server"
+	@echo "  make build               Compile TypeScript"
+	@echo "  make layer-deps-update   Regenerate uv.lock files for lambda layers"
+	@echo "  make clean               Remove build artifacts"
+	@echo "  make share               Show commands friends can use to start/stop/check the server"
 
 # --- helpers ---
 
@@ -80,6 +82,12 @@ endef
 define get_custom_domain_url
 $$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
 	--query 'Stacks[0].Outputs[?OutputKey==`ControlCustomDomainUrl`].OutputValue' \
+	--output text 2>/dev/null)
+endef
+
+define get_bucket_name
+$(shell aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
+	--query 'Stacks[0].Outputs[?contains(OutputKey,`BucketName`)].OutputValue' \
 	--output text 2>/dev/null)
 endef
 
@@ -173,25 +181,29 @@ world-download: check-instance-running
 	@echo "Downloading world files from server..."
 	@mkdir -p $(WORLDS_LOCAL)
 	@INSTANCE_ID=$(call get_instance_id) && \
-	IP=$$(aws ec2 describe-instances --instance-ids "$$INSTANCE_ID" \
-		--query 'Reservations[0].Instances[0].PublicIpAddress' --output text) && \
-	echo "Fetching file list..." && \
+	BUCKET=$(call get_bucket_name) && \
+	echo "Packing world files on instance..." && \
+	CMD=$$(printf '%s' "ls $(WORLDS_REMOTE)/*.fwl $(WORLDS_REMOTE)/*.db >/dev/null 2>&1 || { echo EMPTY; exit 0; }; cd $(WORLDS_REMOTE) && tar czf /tmp/valheim-worlds.tar.gz . && aws s3 cp /tmp/valheim-worlds.tar.gz s3://$$BUCKET/download/worlds.tar.gz && rm /tmp/valheim-worlds.tar.gz && echo UPLOADED") && \
 	CMD_ID=$$(aws ssm send-command --instance-ids "$$INSTANCE_ID" \
 		--document-name "AWS-RunShellScript" \
-		--parameters 'commands=["cd $(WORLDS_REMOTE) && tar czf /tmp/valheim-worlds.tar.gz . 2>/dev/null && echo PACKED || echo EMPTY"]' \
-		--output json --query 'Command.CommandId' --output text) && \
-	sleep 5 && \
+		--parameters "{\"commands\":[\"$$CMD\"]}" \
+		--output text --query 'Command.CommandId') && \
+	echo "Waiting for SSM command to complete..." && \
+	for i in $$(seq 1 24); do \
+		STATUS=$$(aws ssm get-command-invocation --command-id "$$CMD_ID" --instance-id "$$INSTANCE_ID" \
+			--query 'Status' --output text 2>/dev/null); \
+		if [ "$$STATUS" = "Success" ]; then break; fi; \
+		if [ "$$STATUS" = "Failed" ] || [ "$$STATUS" = "Cancelled" ] || [ "$$STATUS" = "TimedOut" ]; then \
+			echo "SSM command failed (status: $$STATUS). Check instance logs for details."; exit 1; fi; \
+		sleep 5; \
+	done && \
 	RESULT=$$(aws ssm get-command-invocation --command-id "$$CMD_ID" --instance-id "$$INSTANCE_ID" \
-		--query "StandardOutputContent" --output text) && \
-	if echo "$$RESULT" | grep -q "PACKED"; then \
-		echo "Copying via SSM..." && \
-		aws ssm start-session --target "$$INSTANCE_ID" \
-			--document-name "AWS-StartPortForwardingSession" \
-			--parameters '{"portNumber":["22"],"localPortNumber":["2222"]}' & \
-		sleep 3 && \
-		scp -P 2222 -o StrictHostKeyChecking=no localhost:/tmp/valheim-worlds.tar.gz $(WORLDS_LOCAL)/ && \
-		kill %1 2>/dev/null; \
-		cd $(WORLDS_LOCAL) && tar xzf valheim-worlds.tar.gz && rm valheim-worlds.tar.gz; \
+		--query 'StandardOutputContent' --output text) && \
+	if echo "$$RESULT" | grep -q "UPLOADED"; then \
+		echo "Copying from S3..." && \
+		aws s3 cp "s3://$$BUCKET/download/worlds.tar.gz" $(WORLDS_LOCAL)/worlds.tar.gz && \
+		aws s3 rm "s3://$$BUCKET/download/worlds.tar.gz" && \
+		cd $(WORLDS_LOCAL) && tar xzf worlds.tar.gz && rm worlds.tar.gz; \
 		echo "World files downloaded to $(WORLDS_LOCAL)/"; \
 	else \
 		echo "No world files found on server."; \
@@ -404,6 +416,12 @@ share: check-aws-auth
 	echo "  curl $${STATUS_URL}" && \
 	echo "  wget -qO- $${STATUS_URL}" && \
 	echo "  Invoke-WebRequest -Uri $${STATUS_URL}"
+
+layer-deps-update:
+	@echo "Regenerating uv.lock files for all lambda layers..."
+	@cd lambda/control && uv lock
+	@cd lambda/auto-shutdown && uv lock
+	@echo "Done. Commit the updated uv.lock files."
 
 clean:
 	rm -rf cdk.out cdk-nag-out lib/**/*.js lib/**/*.d.ts bin/*.js bin/*.d.ts

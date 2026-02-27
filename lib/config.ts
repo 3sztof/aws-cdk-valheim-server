@@ -94,19 +94,19 @@ export function toEventBridgeCron(cron: string): string {
 
 export function loadConfig(configPath?: string): ValheimConfig {
   const resolvedPath = configPath || path.join(process.cwd(), 'config.yaml');
-  
+
   if (!fs.existsSync(resolvedPath)) {
     throw new Error(
       `Config file not found: ${resolvedPath}\n` +
       `Run "make init" to create config.yaml from the template.`
     );
   }
-  
+
   const fileContents = fs.readFileSync(resolvedPath, 'utf8');
   const config = yaml.load(fileContents) as ValheimConfig;
-  
+
   validateConfig(config);
-  
+
   return config;
 }
 
@@ -114,23 +114,23 @@ function validateConfig(config: ValheimConfig): void {
   if (!config.server?.name) {
     throw new Error('server.name is required');
   }
-  
+
   if (!config.server?.world) {
     throw new Error('server.world is required');
   }
-  
+
   if (!config.instance?.type) {
     throw new Error('instance.type is required');
   }
-  
+
   if (!config.instance?.region) {
     throw new Error('instance.region is required');
   }
-  
+
   if (config.instance?.volumeSize && config.instance.volumeSize < 8) {
     throw new Error('instance.volumeSize must be at least 8 GB');
   }
-  
+
   if (!config.tags?.Project) {
     throw new Error('tags.Project is required for cost allocation');
   }

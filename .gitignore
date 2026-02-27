@@ -16,8 +16,10 @@ cdk.context.json
 # User config (contains passwords, Steam IDs, emails)
 config.yaml
 
-# World files (large binaries)
-worlds/
+# World files (large binaries, local saves)
+.worlds/
+*.fwl
+*.db
 
 # OS
 .DS_Store
@@ -29,3 +31,7 @@ Thumbs.db
 *~
 .idea/
 .vscode/
+# Python
+lambda/**/__pycache__/
+lambda/**/*.pyc
+lambda/**/.venv/

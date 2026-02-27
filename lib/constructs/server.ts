@@ -13,17 +13,18 @@ export interface ValheimServerProps {
   config: ValheimConfig;
   vpc: ec2.IVpc;
   backupBucket: s3.IBucket;
+  controlBaseUrl: string;
 }
-
 export class ValheimServer extends Construct {
   public readonly instance: ec2.CfnInstance;
   public readonly securityGroup: ec2.SecurityGroup;
   public readonly role: iam.Role;
+  public readonly publicIp: string;
 
   constructor(scope: Construct, id: string, props: ValheimServerProps) {
     super(scope, id);
 
-    const { config, vpc, backupBucket } = props;
+    const { config, vpc, backupBucket, controlBaseUrl } = props;
 
     this.securityGroup = new ec2.SecurityGroup(this, 'SecurityGroup', {
       vpc,
@@ -83,7 +84,7 @@ export class ValheimServer extends Construct {
     });
 
     const serverPassword = config.server.password || this.generatePassword();
-    
+
     new ssm.StringParameter(this, 'ServerPassword', {
       parameterName: '/valheim-server/password',
       stringValue: serverPassword,
@@ -91,7 +92,15 @@ export class ValheimServer extends Construct {
       tier: ssm.ParameterTier.STANDARD,
     });
 
-    const userData = this.generateUserData(config, backupBucket.bucketName, serverPassword);
+    const eip = new ec2.CfnEIP(this, 'ElasticIP', {
+      domain: 'vpc',
+      tags: Object.entries(config.tags).map(([key, value]) => ({ key, value })).concat([
+        { key: 'Name', value: `valheim-${config.server.name}-eip` },
+      ]),
+    });
+    this.publicIp = eip.attrPublicIp;
+
+    const userData = this.generateUserData(config, backupBucket.bucketName, serverPassword, controlBaseUrl, eip.attrPublicIp);
 
     const amiId = ssm.StringParameter.valueForStringParameter(
       this,
@@ -134,11 +143,11 @@ export class ValheimServer extends Construct {
         spotInstanceType: 'persistent',
         instanceInterruptionBehavior: 'stop',
       };
-      
+
       if (config.instance.maxSpotPrice > 0) {
         (spotOptions as any).maxPrice = config.instance.maxSpotPrice.toString();
       }
-      
+
       (launchTemplateData as any).instanceMarketOptions = {
         marketType: 'spot',
         spotOptions,
@@ -160,6 +169,11 @@ export class ValheimServer extends Construct {
       ]),
     });
 
+    new ec2.CfnEIPAssociation(this, 'ElasticIPAssociation', {
+      instanceId: this.instance.ref,
+      allocationId: eip.attrAllocationId,
+    });
+
     NagSuppressions.addResourceSuppressions(this.instance, [
       { id: 'AwsSolutions-EC28', reason: 'Detailed monitoring is enabled via launch template monitoring.enabled=true' },
       { id: 'AwsSolutions-EC29', reason: 'Not using ASG or termination protection - CDK manages the instance lifecycle. World data is backed up to S3.' },
@@ -171,7 +185,7 @@ export class ValheimServer extends Construct {
     });
   }
 
-  private generateUserData(config: ValheimConfig, bucketName: string, password: string): string {
+  private generateUserData(config: ValheimConfig, bucketName: string, password: string, controlBaseUrl: string, publicIp: string): string {
     const templatePath = path.join(__dirname, 'userdata', 'setup.sh');
     let script = fs.readFileSync(templatePath, 'utf8');
 
@@ -187,6 +201,8 @@ export class ValheimServer extends Construct {
       '${BACKUP_BUCKET}': bucketName,
       '${DISCORD_WEBHOOK_PARAM}': config.discord.enabled ? config.discord.webhookParameterName : '',
       '${BACKUP_CRON}': config.backup.schedule,
+      '${CONTROL_BASE_URL}': controlBaseUrl,
+      '${SERVER_PUBLIC_IP}': publicIp,
     };
 
     for (const [placeholder, value] of Object.entries(replacements)) {
