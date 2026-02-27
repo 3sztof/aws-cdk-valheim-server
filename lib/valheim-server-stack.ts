@@ -49,10 +49,18 @@ export class ValheimServerStack extends cdk.Stack {
 
     const backupBucket = new BackupBucket(this, 'Backup', { config });
 
+    // Compute the control base URL from config - used in EC2 userdata for Discord hooks.
+    // Custom domain URL is deterministic at synth time; API Gateway URL is a deploy-time token
+    // and cannot be embedded in userdata. Falls back to empty string (hooks will show no URL).
+    const controlBaseUrl = config.domain?.enabled
+      ? `https://${config.domain.subdomain ? config.domain.subdomain + '.' : ''}${config.domain.hostedZoneName}/server/`
+      : '';
+
     const server = new ValheimServer(this, 'Server', {
       config,
       vpc,
       backupBucket: backupBucket.bucket,
+      controlBaseUrl,
     });
 
     const control = new ServerControl(this, 'Control', {
@@ -69,6 +77,11 @@ export class ValheimServerStack extends cdk.Stack {
     if (config.budget?.enabled) {
       new BudgetAlert(this, 'Budget', { config });
     }
+
+    new cdk.CfnOutput(this, 'ServerPublicIp', {
+      value: server.publicIp,
+      description: 'Static public IP for the Valheim server (Elastic IP)',
+    });
 
     new cdk.CfnOutput(this, 'ServerConnectionInfo', {
       value: `Connect using the public IP from the status endpoint: ${control.api.url}server/status`,
