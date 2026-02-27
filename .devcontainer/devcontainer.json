@@ -3,9 +3,14 @@
   "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
   "features": {
     "ghcr.io/devcontainers/features/aws-cli:1": {},
-    "ghcr.io/devcontainers/features/git:1": {}
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/go:1": {},
+    "ghcr.io/devcontainers/features/rust:1": {}
   },
-  "postCreateCommand": "pip install pre-commit && npm install && pre-commit install",
+  "remoteEnv": {
+    "PATH": "${containerEnv:HOME}/.opencode/bin:${containerEnv:HOME}/.local/bin:${containerEnv:PATH}"
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
   "customizations": {
     "vscode": {
       "extensions": [
