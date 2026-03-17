@@ -28,14 +28,14 @@ export class ValheimServer extends Construct {
 
     this.securityGroup = new ec2.SecurityGroup(this, 'SecurityGroup', {
       vpc,
-      description: 'Valheim server security group',
+      description: `${config.workloadName} server security group`,
       allowAllOutbound: true,
     });
 
     this.securityGroup.addIngressRule(
       ec2.Peer.anyIpv4(),
       ec2.Port.udpRange(2456, 2458),
-      'Valheim game ports'
+      `${config.workloadName} game ports`
     );
 
     NagSuppressions.addResourceSuppressions(this.securityGroup, [
@@ -86,16 +86,16 @@ export class ValheimServer extends Construct {
     const serverPassword = config.server.password || this.generatePassword();
 
     new ssm.StringParameter(this, 'ServerPassword', {
-      parameterName: '/valheim-server/password',
+      parameterName: `/${config.workloadName}/password`,
       stringValue: serverPassword,
-      description: 'Valheim server password',
+      description: `${config.workloadName} server password`,
       tier: ssm.ParameterTier.STANDARD,
     });
 
     const eip = new ec2.CfnEIP(this, 'ElasticIP', {
       domain: 'vpc',
       tags: Object.entries(config.tags).map(([key, value]) => ({ key, value })).concat([
-        { key: 'Name', value: `valheim-${config.server.name}-eip` },
+        { key: 'Name', value: `${config.workloadName}-${config.server.name}-eip` },
       ]),
     });
     this.publicIp = eip.attrPublicIp;
@@ -165,7 +165,7 @@ export class ValheimServer extends Construct {
       },
       subnetId: subnet.subnetId,
       tags: Object.entries(config.tags).map(([key, value]) => ({ key, value })).concat([
-        { key: 'Name', value: `valheim-${config.server.name}` },
+        { key: 'Name', value: `${config.workloadName}-${config.server.name}` },
       ]),
     });
 
@@ -181,7 +181,7 @@ export class ValheimServer extends Construct {
 
     new cdk.CfnOutput(this, 'InstanceId', {
       value: this.instance.ref,
-      description: 'Valheim server EC2 instance ID',
+      description: `${config.workloadName} server EC2 instance ID`,
     });
   }
 
@@ -203,6 +203,7 @@ export class ValheimServer extends Construct {
       '${BACKUP_CRON}': config.backup.schedule,
       '${CONTROL_BASE_URL}': controlBaseUrl,
       '${SERVER_PUBLIC_IP}': publicIp,
+      '${WORKLOAD_NAME}': config.workloadName,
     };
 
     for (const [placeholder, value] of Object.entries(replacements)) {

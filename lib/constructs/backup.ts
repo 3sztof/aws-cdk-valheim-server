@@ -71,7 +71,7 @@ export class BackupBucket extends Construct {
 
     new cdk.CfnOutput(this, 'BucketName', {
       value: this.bucket.bucketName,
-      description: 'Valheim backup S3 bucket name',
+      description: `${config.workloadName} backup S3 bucket name`,
     });
   }
 }

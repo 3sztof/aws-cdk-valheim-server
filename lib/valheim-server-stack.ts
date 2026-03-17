@@ -108,7 +108,7 @@ export class ValheimServerStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, 'ServerPublicIp', {
       value: server.publicIp,
-      description: 'Static public IP for the Valheim server (Elastic IP)',
+      description: `Static public IP for the ${config.workloadName} server (Elastic IP)`,
     });
 
     new cdk.CfnOutput(this, 'ServerConnectionInfo', {

@@ -32,8 +32,8 @@ export class AutoShutdown extends Construct {
     // Lambda layer: aws-lambda-powertools installed via uv into lambda/auto-shutdown/layer/python/.
     // CDK local bundling runs uv at synth time; the output is zipped as the layer asset.
     const powertoolsLayer = new lambda.LayerVersion(this, 'PowertoolsLayer', {
-      layerVersionName: 'valheim-autoshutdown-powertools',
-      description: 'aws-lambda-powertools for valheim-autoshutdown (built by uv)',
+      layerVersionName: `${config.workloadName}-autoshutdown-powertools`,
+      description: `aws-lambda-powertools for ${config.workloadName}-autoshutdown (built by uv)`,
       compatibleRuntimes: [lambda.Runtime.PYTHON_3_13],
       compatibleArchitectures: [lambda.Architecture.X86_64],
       code: lambda.Code.fromAsset(path.join(__dirname, '../../lambda/auto-shutdown'), {
@@ -86,9 +86,10 @@ export class AutoShutdown extends Construct {
       code: lambda.Code.fromAsset(path.join(__dirname, '../../lambda/auto-shutdown')),
       environment: {
         INSTANCE_ID: instanceId,
+        CONTAINER_NAME: config.workloadName,
         // Powertools configuration
-        POWERTOOLS_SERVICE_NAME: 'valheim-autoshutdown',
-        POWERTOOLS_METRICS_NAMESPACE: 'ValheimServer',
+        POWERTOOLS_SERVICE_NAME: `${config.workloadName}-autoshutdown`,
+        POWERTOOLS_METRICS_NAMESPACE: config.workloadName,
         LOG_LEVEL: 'INFO',
       },
       tracing: lambda.Tracing.ACTIVE,
@@ -123,8 +124,8 @@ export class AutoShutdown extends Construct {
     ], true);
 
     this.idleAlarm = new cloudwatch.Alarm(this, 'IdleAlarm', {
-      alarmName: 'valheim-server-idle',
-      alarmDescription: 'Triggers when Valheim server CPU is below threshold (idle)',
+      alarmName: `${config.workloadName}-server-idle`,
+      alarmDescription: `Triggers when ${config.workloadName} server CPU is below threshold (idle)`,
       metric: new cloudwatch.Metric({
         namespace: 'AWS/EC2',
         metricName: 'CPUUtilization',

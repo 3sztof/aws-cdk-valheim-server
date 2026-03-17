@@ -30,8 +30,8 @@ export class ServerControl extends Construct {
     // Lambda layer: aws-lambda-powertools installed via uv into lambda/control/layer/python/.
     // CDK local bundling runs uv at synth time; the output is zipped as the layer asset.
     const powertoolsLayer = new lambda.LayerVersion(this, 'PowertoolsLayer', {
-      layerVersionName: 'valheim-control-powertools',
-      description: 'aws-lambda-powertools for valheim-control (built by uv)',
+      layerVersionName: `${config.workloadName}-control-powertools`,
+      description: `aws-lambda-powertools for ${config.workloadName}-control (built by uv)`,
       compatibleRuntimes: [lambda.Runtime.PYTHON_3_13],
       compatibleArchitectures: [lambda.Architecture.X86_64],
       code: lambda.Code.fromAsset(path.join(__dirname, '../../lambda/control'), {
@@ -95,9 +95,10 @@ export class ServerControl extends Construct {
         CONTROL_BASE_URL: config.domain?.enabled
           ? `https://${config.domain.subdomain ? config.domain.subdomain + '.' : ''}${config.domain.hostedZoneName}/server/`
           : '',
+        CONTAINER_NAME: config.workloadName,
         // Powertools configuration
-        POWERTOOLS_SERVICE_NAME: 'valheim-control',
-        POWERTOOLS_METRICS_NAMESPACE: 'ValheimServer',
+        POWERTOOLS_SERVICE_NAME: `${config.workloadName}-control`,
+        POWERTOOLS_METRICS_NAMESPACE: config.workloadName,
         LOG_LEVEL: 'INFO',
       },
     });
@@ -151,8 +152,8 @@ export class ServerControl extends Construct {
     });
 
     this.api = new apigateway.RestApi(this, 'ControlApi', {
-      restApiName: 'Valheim Server Control',
-      description: 'API for controlling Valheim server',
+      restApiName: `${config.workloadName} server control`,
+      description: `API for controlling ${config.workloadName} server`,
       endpointTypes: [apigateway.EndpointType.REGIONAL],
       deployOptions: {
         stageName: 'prod',
