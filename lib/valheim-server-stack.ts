@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as appregistry from 'aws-cdk-lib/aws-servicecatalogappregistry';
 import { Construct } from 'constructs';
 import { ValheimConfig } from './config';
 import { ValheimServer } from './constructs/server';
@@ -22,6 +23,33 @@ export class ValheimServerStack extends cdk.Stack {
     Object.entries(config.tags).forEach(([key, value]) => {
       cdk.Tags.of(this).add(key, value);
     });
+
+    // Register this stack as an AWS myApplications application so it appears
+    // in the AWS Console > Applications view and enables per-application cost
+    // tracking in Cost Explorer.
+    const appRegistryApp = new appregistry.CfnApplication(this, 'AppRegistryApplication', {
+      name: config.tags.Project,
+      description: `${config.workloadName} dedicated server - ${config.server.name}`,
+      tags: {
+        ...config.tags,
+      },
+    });
+
+    // Associate the entire CloudFormation stack with the AppRegistry application.
+    new appregistry.CfnResourceAssociation(this, 'AppRegistryStackAssociation', {
+      application: appRegistryApp.attrId,
+      resource: this.stackId,
+      resourceType: 'CFN_STACK',
+    });
+
+    // Explicitly apply the awsApplication tag to all resources in this stack.
+    // CfnResourceAssociation alone does NOT auto-propagate this tag - it must be
+    // applied explicitly. This tag is what makes resources visible under the
+    // application in the AWS Console myApplications view and Cost Explorer.
+    cdk.Tags.of(this).add(
+      appRegistryApp.attrApplicationTagKey,
+      appRegistryApp.attrApplicationTagValue,
+    );
 
     const vpc = new ec2.Vpc(this, 'Vpc', {
       ipAddresses: ec2.IpAddresses.cidr('10.0.0.0/16'),

@@ -68,6 +68,10 @@ export interface DomainConfig {
 }
 
 export interface ValheimConfig {
+  // Workload name used as a prefix for all AWS resource names, tags, and
+  // identifiers. Defaults to "valheim". Change this to avoid the game name
+  // appearing in the AWS console (e.g. set to "gameserver" or "ds").
+  workloadName: string;
   server: ServerConfig;
   instance: InstanceConfig;
   backup: BackupConfig;
@@ -105,12 +109,22 @@ export function loadConfig(configPath?: string): ValheimConfig {
   const fileContents = fs.readFileSync(resolvedPath, 'utf8');
   const config = yaml.load(fileContents) as ValheimConfig;
 
+  // Apply defaults before validation so validators can rely on them.
+  config.workloadName = (config.workloadName || 'valheim').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+
   validateConfig(config);
 
   return config;
 }
 
 function validateConfig(config: ValheimConfig): void {
+  if (!config.workloadName || config.workloadName.length < 2) {
+    throw new Error('workload_name must be at least 2 characters');
+  }
+  if (config.workloadName.length > 32) {
+    throw new Error('workload_name must be 32 characters or fewer (used as resource name prefix)');
+  }
+
   if (!config.server?.name) {
     throw new Error('server.name is required');
   }
