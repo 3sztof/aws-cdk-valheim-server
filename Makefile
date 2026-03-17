@@ -177,6 +177,7 @@ pre-deploy-backup: check-aws-auth
 	fi
 
 deploy: check-aws-auth build pre-deploy-backup
+	rm -rf cdk.out
 	npx cdk deploy --require-approval broadening
 
 destroy: check-aws-auth
