@@ -35,3 +35,8 @@ Thumbs.db
 lambda/**/__pycache__/
 lambda/**/*.pyc
 lambda/**/.venv/
+.venv/
+__pycache__/
+
+# TypeScript incremental build cache
+.tsbuildinfo

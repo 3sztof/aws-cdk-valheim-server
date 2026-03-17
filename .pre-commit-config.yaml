@@ -48,7 +48,7 @@ repos:
         types: [python]
         files: ^lambda/
         pass_filenames: false
-        args: [lambda/control, lambda/auto-shutdown]
+        args: [--python, .venv, lambda/control, lambda/auto-shutdown]
 
   # TypeScript: type checking with tsc
   - repo: local
