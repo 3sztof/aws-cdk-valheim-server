@@ -22,7 +22,8 @@ NOTIFY_ON_START = os.environ.get("NOTIFY_ON_START", "false") == "true"
 NOTIFY_ON_STOP = os.environ.get("NOTIFY_ON_STOP", "false") == "true"
 CONTROL_BASE_URL = os.environ.get(
     "CONTROL_BASE_URL", ""
-)  # e.g. https://example.com/valheim/server/
+)  # e.g. https://example.com/server/
+CONTAINER_NAME = os.environ.get("CONTAINER_NAME", "valheim")
 
 LOG_LINES = 30
 SSM_LOG_TIMEOUT = 30
@@ -36,7 +37,7 @@ _HTML_BASE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Valheim Server - {title}</title>
+<title>CONTAINER_NAME_PLACEHOLDER - {title}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=MedievalSharp&family=Cinzel:wght@400;600&family=Inter:wght@400;500&display=swap');
   *{{box-sizing:border-box;margin:0;padding:0}}
@@ -89,17 +90,20 @@ function confirmAction(msg) {{
 </script>
 </body>
 </html>"""
+# Substitute the container name into the template once at module load so all
+# .format(title=...) calls get the right name without needing an extra kwarg.
+_HTML_BASE = _HTML_BASE.replace("CONTAINER_NAME_PLACEHOLDER", CONTAINER_NAME)
 
 
 def _classify_log(line):
-    l = line.lower()
-    if "zdoid from" in l and ": 0:0" in l:
+    lower_line = line.lower()
+    if "zdoid from" in lower_line and ": 0:0" in lower_line:
         return "death"
-    if "zdoid from" in l:
+    if "zdoid from" in lower_line:
         return "join"
-    if "random event" in l or "raid" in l:
+    if "random event" in lower_line or "raid" in lower_line:
         return "raid"
-    if "world saved" in l or "saving" in l:
+    if "world saved" in lower_line or "saving" in lower_line:
         return "save"
     return ""
 
@@ -112,7 +116,7 @@ def _render_logs_html(lines):
         cls = _classify_log(line)
         escaped = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         items += f'<div class="log-line {cls}">{escaped}</div>\n'
-    return f'<div class="logs"><div class="logs-title">Recent Valheim container log</div>{items}</div>'
+    return f'<div class="logs"><div class="logs-title">Recent {CONTAINER_NAME} log</div>{items}</div>'
 
 
 def _base_url():
@@ -151,7 +155,6 @@ def _container_badge_html(container_status):
 
 
 def html_start_page(action_taken):
-    start_url = _base_url() + "start"
     stop_url = _base_url() + "stop"
     status_url = _base_url() + "status"
     body = f"""
@@ -159,7 +162,7 @@ def html_start_page(action_taken):
 <p class="subtitle">The EC2 instance is booting up.</p>
 <span class="badge badge-yellow">&#9654; EC2 Starting</span>
 <hr class="divider">
-<p class="notice">The <strong>EC2 instance</strong> is starting. The Valheim container will launch
+<p class="notice">The <strong>EC2 instance</strong> is starting. The game server container will launch
 automatically once the instance is online &mdash; this usually takes <strong>2-3 minutes</strong>
 before the game server is joinable.</p>
 <div class="actions">
@@ -177,10 +180,10 @@ def html_stop_page():
 <p class="subtitle">The EC2 instance is shutting down.</p>
 <span class="badge badge-red">&#9209; EC2 Stopping</span>
 <hr class="divider">
-<p class="notice">The Valheim container saves the world before the <strong>EC2 instance</strong>
+<p class="notice">The game server container saves the world before the <strong>EC2 instance</strong>
 shuts down. It may take up to a minute to fully stop.</p>
 <div class="actions">
-  <a class="btn btn-green" href="{start_url}" onclick="return confirmAction('Start the EC2 instance and launch the Valheim server?')">&#9654; Start</a>
+  <a class="btn btn-green" href="{start_url}" onclick="return confirmAction('Start the EC2 instance and launch the game server?')">&#9654; Start</a>
   <a class="btn btn-muted" href="{status_url}">&#128269; Status</a>
 </div>"""
     return _HTML_BASE.format(title="Stopping", viking="&#128128;", body=body)
@@ -210,7 +213,7 @@ def html_player_check_failed_page():
 <span class="badge badge-yellow">&#9888; Check Failed</span>
 <hr class="divider">
 <p class="notice">The player check could not be completed (the instance may be
-unreachable via SSM or the Valheim container is not running).<br><br>
+unreachable via SSM or the game server container is not running).<br><br>
 To protect active players, the stop was <strong>rejected</strong>.<br>
 Check the status page, then try again in a moment.</p>
 <div class="actions">
@@ -237,13 +240,13 @@ def html_status_page(status, logs, container_status):
         )
         actions = f"""
   <a class="btn btn-muted" href="{status_url}">&#8635; Refresh</a>
-  <a class="btn btn-red" href="{stop_url}" onclick="return confirmAction('Stop the EC2 instance? Active players will be disconnected and the Valheim server will shut down.')">&#9209; Stop EC2</a>"""
+  <a class="btn btn-red" href="{stop_url}" onclick="return confirmAction('Stop the EC2 instance? Active players will be disconnected and the game server will shut down.')">&#9209; Stop EC2</a>"""
     elif state == "stopped":
         ec2_badge = '<span class="badge badge-red">&#9679; EC2 Offline</span>'
         viking = "&#128128;"
         connect = "<dd>Server is offline</dd>"
         actions = f"""
-  <a class="btn btn-green" href="{start_url}" onclick="return confirmAction('Start the EC2 instance? The Valheim server will launch automatically after boot (~2-3 min).')">&#9654; Start EC2</a>
+  <a class="btn btn-green" href="{start_url}" onclick="return confirmAction('Start the EC2 instance? The game server will launch automatically after boot (~2-3 min).')">&#9654; Start EC2</a>
   <a class="btn btn-muted" href="{status_url}">&#8635; Refresh</a>"""
     else:
         ec2_badge = (
@@ -260,7 +263,7 @@ def html_status_page(status, logs, container_status):
     )
     container_hint = (
         '<p class="hint">&#9432; Status reflects the EC2 instance. '
-        "The Valheim container may take additional time to become ready after the instance starts.</p>"
+        "The game server container may take additional time to become ready after the instance starts.</p>"
         if state != "stopped"
         else ""
     )
@@ -268,7 +271,7 @@ def html_status_page(status, logs, container_status):
     logs_html = _render_logs_html(logs) if logs else ""
 
     body = f"""
-<h1>Valheim Server</h1>
+<h1>{CONTAINER_NAME}</h1>
 <p class="subtitle">Status and controls</p>
 {ec2_badge}
 {"&nbsp;" + container_badge_html if container_badge_html else ""}
@@ -320,7 +323,7 @@ def send_discord_notification(message, color=3447003):
 
         payload = {
             "embeds": [
-                {"title": "Valheim Server", "description": message, "color": color}
+                {"title": CONTAINER_NAME, "description": message, "color": color}
             ]
         }
 
@@ -354,7 +357,7 @@ def get_container_status():
     import time
 
     cmd = (
-        "docker inspect valheim "
+        f"docker inspect {CONTAINER_NAME} "
         "--format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}|{{.State.StartedAt}}' "
         "2>/dev/null || echo 'notfound||'"
     )
@@ -422,7 +425,9 @@ def get_recent_logs():
         cmd = ssm.send_command(
             InstanceIds=[INSTANCE_ID],
             DocumentName="AWS-RunShellScript",
-            Parameters={"commands": [f"docker logs --tail {LOG_LINES} valheim 2>&1"]},
+            Parameters={
+                "commands": [f"docker logs --tail {LOG_LINES} {CONTAINER_NAME} 2>&1"]
+            },
             TimeoutSeconds=SSM_LOG_TIMEOUT,
         )
         command_id = cmd["Command"]["CommandId"]
@@ -437,7 +442,7 @@ def get_recent_logs():
             if status in ("Success", "Failed", "Cancelled", "TimedOut"):
                 if status == "Success":
                     raw = result.get("StandardOutputContent", "")
-                    lines = [l for l in raw.splitlines() if l.strip()]
+                    lines = [ln for ln in raw.splitlines() if ln.strip()]
                     logger.info(
                         "Fetched container logs", extra={"line_count": len(lines)}
                     )

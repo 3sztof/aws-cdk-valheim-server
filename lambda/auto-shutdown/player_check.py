@@ -10,6 +10,7 @@ tracer = Tracer()
 ssm = boto3.client("ssm")
 
 INSTANCE_ID = os.environ["INSTANCE_ID"]
+CONTAINER_NAME = os.environ.get("CONTAINER_NAME", "valheim")
 
 # How long to wait (seconds) for the SSM invocation result after the command
 # is sent. valheim-is-idle takes ~4s (IDLE_DATAGRAM_WINDOW=3 + overhead) for
@@ -47,7 +48,7 @@ def are_players_online() -> bool | None:
     """
     # Run valheim-is-idle inside the container so it uses the container's
     # network namespace and environment variables (IDLE_DATAGRAM_WINDOW etc.).
-    cmd = 'docker exec valheim valheim-is-idle; echo "exit:$?"'
+    cmd = f'docker exec {CONTAINER_NAME} valheim-is-idle; echo "exit:$?"'
 
     try:
         result = ssm.send_command(
