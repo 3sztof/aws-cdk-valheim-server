@@ -2,6 +2,12 @@
 
 AWS CDK project that deploys a cost-effective Valheim dedicated server on EC2 with automatic S3 backups, idle auto-shutdown, a public REST API for server control, and optional Discord notifications.
 
+## Support the Maintainer
+
+If this project saved you time, consider buying me a coffee.
+
+[![Buy Me A Coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/3sztof)
+
 > **Disclaimer:** This project is provided as-is, without warranty of any kind. You use it at your own risk. The author is not responsible for any costs, data loss, or other issues arising from its use. Always review infrastructure changes before deploying to your AWS account.
 
 ## Architecture
@@ -407,9 +413,3 @@ The game server itself runs inside the [lloesche/valheim-server-docker](https://
 ## License
 
 Copyright 2026 Krzysztof Wilczynski. Licensed under the [Apache License, Version 2.0](LICENSE).
-
-## Support the Maintainer
-
-If this project saved you time, consider buying me a coffee.
-
-[![Buy Me A Coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/3sztof)
