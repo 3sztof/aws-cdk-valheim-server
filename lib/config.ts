@@ -112,6 +112,12 @@ export function loadConfig(configPath?: string): ValheimConfig {
   // Apply defaults before validation so validators can rely on them.
   config.workloadName = (config.workloadName || 'valheim').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
 
+  // Default the Discord webhook SSM parameter path from workloadName so the
+  // config never needs a hardcoded game name in the parameter path.
+  if (config.discord?.enabled && !config.discord.webhookParameterName) {
+    config.discord.webhookParameterName = `/${config.workloadName}/discord-webhook`;
+  }
+
   validateConfig(config);
 
   return config;

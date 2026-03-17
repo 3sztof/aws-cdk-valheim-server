@@ -30,11 +30,15 @@ server:
 
 instance:
   # EC2 instance type
-  # t3a.large (2 vCPU, 8GB RAM) - recommended, Valheim needs 4GB+ free
-  # t3a.medium (2 vCPU, 4GB RAM) - too small, causes memory warnings
-  type: "t3a.large"
+  # c7a.large (2 vCPU, 4GB RAM, 3.7GHz AMD Genoa) - recommended for Valheim
+  #   Valheim is single-thread bottlenecked; high clock speed matters more than
+  #   core count or RAM. c7a is non-burstable (no credit exhaustion lag spikes)
+  #   and 68% faster clock than t3a.large at ~15% higher on-demand cost.
+  # m7a.large (2 vCPU, 8GB RAM, 3.7GHz) - same CPU, more RAM, ~20% more expensive
+  # t3a.large (2 vCPU, 8GB RAM, 2.2GHz) - burstable, lag risk under sustained load
+  type: "c7a.large"
   # Use Spot instances for cost savings (~60-70% cheaper)
-  # Risk: instance may be interrupted (rare for t3a)
+  # Risk: instance may be interrupted (rare for c7a)
   useSpot: false
   # Maximum spot price (USD/hour) - set to 0 for on-demand price cap
   maxSpotPrice: 0.05
@@ -70,10 +74,13 @@ discord:
   # Enable Discord notifications
   enabled: false
   # Discord webhook URL - store in SSM Parameter Store as SecureString
-  # The path here should match your workload_name. Example:
+  # The SSM parameter path defaults to /<workload_name>/discord-webhook
+  # (derived automatically - no need to set webhookParameterName explicitly).
+  # To use a custom path, uncomment and set:
+  # webhookParameterName: "/valheim/discord-webhook"
+  # Store the webhook URL with:
   #   aws ssm put-parameter --name "/valheim/discord-webhook" \
   #     --value "https://discord.com/api/webhooks/..." --type SecureString
-  webhookParameterName: "/valheim/discord-webhook"
   # Notify on server start
   notifyOnStart: true
   # Notify on server stop
