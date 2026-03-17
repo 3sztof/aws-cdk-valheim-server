@@ -77,7 +77,7 @@ check-instance-running: check-aws-auth
 define get_instance_id
 $$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
 	--query 'Stacks[0].Outputs[?contains(OutputKey,`InstanceId`)].OutputValue' \
-	--output text 2>/dev/null)
+	--output text 2>/dev/null || echo "")
 endef
 
 define get_api_url
@@ -99,10 +99,13 @@ $(shell aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
 endef
 
 define get_instance_state
-$(shell aws ec2 describe-instances \
-	--instance-ids $(call get_instance_id) \
-	--query 'Reservations[0].Instances[0].State.Name' \
-	--output text 2>/dev/null)
+$(shell \
+	_id=$(call get_instance_id); \
+	if [ -z "$$_id" ] || [ "$$_id" = "None" ]; then echo "not-found"; else \
+	aws ec2 describe-instances \
+		--instance-ids $$_id \
+		--query 'Reservations[0].Instances[0].State.Name' \
+		--output text 2>/dev/null; fi)
 endef
 
 # --- setup ---
@@ -136,7 +139,7 @@ synth: check-aws-auth build
 	npx cdk synth
 
 pre-deploy-backup: check-aws-auth
-	@INSTANCE_ID=$(call get_instance_id) && \
+	@INSTANCE_ID=$(call get_instance_id); \
 	if [ -z "$$INSTANCE_ID" ] || [ "$$INSTANCE_ID" = "None" ]; then \
 		echo "No existing stack found - skipping pre-deploy backup (fresh deploy)."; \
 	else \
