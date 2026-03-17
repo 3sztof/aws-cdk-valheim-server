@@ -35,20 +35,16 @@ export class ValheimServerStack extends cdk.Stack {
       },
     });
 
-    // Associate the entire CloudFormation stack with the AppRegistry application.
-    new appregistry.CfnResourceAssociation(this, 'AppRegistryStackAssociation', {
-      application: appRegistryApp.attrId,
-      resource: this.stackId,
-      resourceType: 'CFN_STACK',
-    });
-
     // Explicitly apply the awsApplication tag to all resources in this stack.
-    // CfnResourceAssociation alone does NOT auto-propagate this tag - it must be
-    // applied explicitly. This tag is what makes resources visible under the
-    // application in the AWS Console myApplications view and Cost Explorer.
+    // This is what makes resources visible under the application in the AWS
+    // Console myApplications view and Cost Explorer.
     // NOTE: attrApplicationTagKey is always the literal string "awsApplication"
-    // (documented by AWS). We cannot use it as a Tags.of() key directly because
-    // CDK resolves tag keys at synth time and rejects CFN tokens there.
+    // (documented by AWS). We use the literal to avoid CDK rejecting a CFN token
+    // as a tag key at synth time.
+    // NOTE: CfnResourceAssociation(CFN_STACK) is intentionally omitted - it
+    // creates a circular dependency (resource references this.stackId which
+    // depends on the stack being fully resolved). Tag propagation via Tags.of()
+    // is sufficient for myApplications and Cost Explorer visibility.
     cdk.Tags.of(this).add(
       'awsApplication',
       appRegistryApp.attrApplicationTagValue,
