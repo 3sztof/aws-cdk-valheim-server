@@ -128,7 +128,45 @@ build:
 synth: check-aws-auth build
 	npx cdk synth
 
-deploy: check-aws-auth build
+pre-deploy-backup: check-aws-auth
+	@INSTANCE_ID=$(call get_instance_id) && \
+	if [ -z "$$INSTANCE_ID" ] || [ "$$INSTANCE_ID" = "None" ]; then \
+		echo "No existing stack found - skipping pre-deploy backup (fresh deploy)."; \
+	else \
+		STATE=$$(aws ec2 describe-instances \
+			--instance-ids "$$INSTANCE_ID" \
+			--query 'Reservations[0].Instances[0].State.Name' \
+			--output text 2>/dev/null || echo "unknown") && \
+		if [ "$$STATE" = "running" ]; then \
+			echo ""; \
+			echo "Pre-deploy backup: triggering backup of current world before deployment..."; \
+			CMD_ID=$$(aws ssm send-command --instance-ids "$$INSTANCE_ID" \
+				--document-name "AWS-RunShellScript" \
+				--parameters "{\"commands\":[\"docker exec $(WORKLOAD_NAME) /usr/local/bin/valheim-backup\"]}" \
+				--output text --query 'Command.CommandId' 2>/dev/null) && \
+			echo "Backup command sent (id: $$CMD_ID). Waiting up to 60s..." && \
+			for i in $$(seq 1 12); do \
+				sleep 5; \
+				STATUS=$$(aws ssm get-command-invocation --command-id "$$CMD_ID" \
+					--instance-id "$$INSTANCE_ID" --query 'Status' --output text 2>/dev/null || echo "Pending"); \
+				if [ "$$STATUS" = "Success" ]; then \
+					echo "Pre-deploy backup completed successfully."; \
+					break; \
+				fi; \
+				if [ "$$STATUS" = "Failed" ] || [ "$$STATUS" = "Cancelled" ] || [ "$$STATUS" = "TimedOut" ]; then \
+					echo "WARNING: Pre-deploy backup failed (status: $$STATUS). World may not be saved."; \
+					echo "Run 'make backup' manually and verify before proceeding."; \
+					read -p "Continue with deploy anyway? [y/N] " confirm && [ "$$confirm" = "y" ] || (echo "Deploy aborted."; exit 1); \
+					break; \
+				fi; \
+				echo "  $$i/12 - status: $$STATUS..."; \
+			done; \
+		else \
+			echo "Server is not running (state: $$STATE) - skipping pre-deploy backup."; \
+		fi; \
+	fi
+
+deploy: check-aws-auth build pre-deploy-backup
 	npx cdk deploy --require-approval broadening
 
 destroy: check-aws-auth
