@@ -107,10 +107,19 @@ export function loadConfig(configPath?: string): ValheimConfig {
   }
 
   const fileContents = fs.readFileSync(resolvedPath, 'utf8');
-  const config = yaml.load(fileContents) as ValheimConfig;
+  const raw = yaml.load(fileContents) as Record<string, unknown>;
+
+  // js-yaml preserves YAML key names verbatim (snake_case), but the TypeScript
+  // interface uses camelCase. Read workload_name from the raw parsed object and
+  // normalise it onto the camelCase field before casting to ValheimConfig.
+  const workloadNameRaw = (raw['workload_name'] ?? raw['workloadName'] ?? 'valheim') as string;
+  delete raw['workload_name'];
+  raw['workloadName'] = workloadNameRaw;
+
+  const config = raw as unknown as ValheimConfig;
 
   // Apply defaults before validation so validators can rely on them.
-  config.workloadName = (config.workloadName || 'valheim').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  config.workloadName = config.workloadName.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'valheim';
 
   // Default the Discord webhook SSM parameter path from workloadName so the
   // config never needs a hardcoded game name in the parameter path.
