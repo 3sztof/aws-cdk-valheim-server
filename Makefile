@@ -1,9 +1,16 @@
 .DEFAULT_GOAL := help
 .PHONY: help init install build synth deploy destroy diff start stop status bootstrap clean \
         world-download world-upload world-list world-reset world-restore backup logs logs-tail share \
-        check-aws-auth check-instance-running layer-deps-update
+        check-aws-auth check-instance-running layer-deps-update pre-deploy-backup
 
-STACK_NAME := ValheimServerStack
+# Derive the CloudFormation stack name from workload_name in config.yaml,
+# mirroring the PascalCase logic in bin/valheim-server.ts.
+# e.g. "valheim" -> "ValheimStack", "game-server" -> "GameServerStack"
+WORKLOAD_NAME := $(shell grep '^workload_name:' config.yaml 2>/dev/null | head -1 | awk '{print $$2}' | tr -d '"' | tr -d "'" | xargs)
+ifeq ($(WORKLOAD_NAME),)
+  WORKLOAD_NAME := valheim
+endif
+STACK_NAME := $(shell echo "$(WORKLOAD_NAME)" | awk -F'-' '{for(i=1;i<=NF;i++) $$i=toupper(substr($$i,1,1)) substr($$i,2); print}' OFS='')Stack
 WORLDS_REMOTE := /opt/valheim/saves/worlds_local
 WORLDS_LOCAL := ./.worlds
 
@@ -190,7 +197,7 @@ logs: check-instance-running
 	@INSTANCE_ID=$(call get_instance_id) && \
 	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
 		--document-name "AWS-RunShellScript" \
-		--parameters 'commands=["docker logs --tail 50 valheim 2>&1"]' \
+		--parameters "{\"commands\":[\"docker logs --tail 50 $(WORKLOAD_NAME) 2>&1\"]}" \
 		--output json --query 'Command.CommandId' | \
 	xargs -I{} sh -c 'sleep 5 && aws ssm get-command-invocation \
 		--command-id {} --instance-id "'"$$INSTANCE_ID"'" \
@@ -201,7 +208,7 @@ logs-tail: check-instance-running
 	@INSTANCE_ID=$(call get_instance_id) && \
 	aws ssm start-session --target "$$INSTANCE_ID" \
 		--document-name "AWS-StartInteractiveCommand" \
-		--parameters 'command=["docker logs -f valheim 2>&1"]'
+		--parameters "{\"command\":[\"docker logs -f $(WORKLOAD_NAME) 2>&1\"]}"
 
 # --- world management ---
 
@@ -293,12 +300,12 @@ world-upload: check-instance-running
 	echo "1/4 Taking backup..." && \
 	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
 		--document-name "AWS-RunShellScript" \
-		--parameters 'commands=["docker exec $$(docker ps -q --filter name=valheim) /usr/local/bin/valheim-backup"]' \
+		--parameters "{\"commands\":[\"docker exec $(WORKLOAD_NAME) /usr/local/bin/valheim-backup\"]}" \
 		--output text --query 'Command.CommandId' | \
 	xargs -I{} sh -c 'sleep 10 && aws ssm get-command-invocation \
 		--command-id {} --instance-id "'"$$INSTANCE_ID"'" \
 		--query "StandardOutputContent" --output text' && \
-	echo "2/4 Stopping Valheim container..." && \
+	echo "2/4 Stopping ${WORKLOAD_NAME} container..." && \
 	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
 		--document-name "AWS-RunShellScript" \
 		--parameters 'commands=["/opt/valheim/stop.sh"]' \
@@ -402,7 +409,7 @@ backup: check-instance-running
 	echo "Triggering backup..." && \
 	aws ssm send-command --instance-ids "$$INSTANCE_ID" \
 		--document-name "AWS-RunShellScript" \
-		--parameters 'commands=["docker exec $$(docker ps -q --filter name=valheim) /usr/local/bin/valheim-backup"]' \
+		--parameters "{\"commands\":[\"docker exec $(WORKLOAD_NAME) /usr/local/bin/valheim-backup\"]}" \
 		--output json --query 'Command.CommandId' | \
 	xargs -I{} sh -c 'sleep 10 && aws ssm get-command-invocation \
 		--command-id {} --instance-id "'"$$INSTANCE_ID"'" \

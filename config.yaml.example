@@ -2,6 +2,14 @@
 # Copy this file to config.yaml and edit:  make init
 # All settings for your AWS-based Valheim dedicated server
 
+# Workload name: used as a prefix for all AWS resource names, tags, and
+# identifiers (CloudWatch alarms, Lambda layers, SSM parameters, EC2 name
+# tags, API Gateway name, etc.). Defaults to "valheim".
+# Change this if you want to avoid the game name appearing in the AWS console
+# (e.g. set to "gameserver", "ds", or any short lowercase label).
+# Allowed characters: a-z, 0-9, hyphens. Max 32 chars.
+workload_name: "valheim"
+
 server:
   # Server display name (shown in server browser)
   name: "MyValheimServer"
@@ -62,11 +70,10 @@ discord:
   # Enable Discord notifications
   enabled: false
   # Discord webhook URL - store in SSM Parameter Store as SecureString
-  # Parameter name: /valheim-server/discord-webhook
-  # Set the SSM parameter with:
-  #   aws ssm put-parameter --name "/valheim-server/discord-webhook" \
+  # The path here should match your workload_name. Example:
+  #   aws ssm put-parameter --name "/valheim/discord-webhook" \
   #     --value "https://discord.com/api/webhooks/..." --type SecureString
-  webhookParameterName: "/valheim-server/discord-webhook"
+  webhookParameterName: "/valheim/discord-webhook"
   # Notify on server start
   notifyOnStart: true
   # Notify on server stop
@@ -76,8 +83,9 @@ discord:
 
 # Cost allocation tags - applied to ALL resources
 # IMPORTANT: Activate these tags in AWS Billing Console > Cost Allocation Tags
+# Tip: set Project to match your workload_name for consistent naming.
 tags:
-  Project: "valheim-server"
+  Project: "valheim"
   Environment: "production"
   ManagedBy: "cdk"
   # Owner: "your-name"
