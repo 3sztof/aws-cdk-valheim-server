@@ -29,7 +29,7 @@ export class ValheimServerStack extends cdk.Stack {
     // tracking in Cost Explorer.
     const appRegistryApp = new appregistry.CfnApplication(this, 'AppRegistryApplication', {
       name: config.tags.Project,
-      description: `${config.workloadName} dedicated server - ${config.server.name}`,
+      description: `${config.workloadName} dedicated server`,
       tags: {
         ...config.tags,
       },

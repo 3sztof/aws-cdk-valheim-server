@@ -95,7 +95,7 @@ export class ValheimServer extends Construct {
     const eip = new ec2.CfnEIP(this, 'ElasticIP', {
       domain: 'vpc',
       tags: Object.entries(config.tags).map(([key, value]) => ({ key, value })).concat([
-        { key: 'Name', value: `${config.workloadName}-${config.server.name}-eip` },
+        { key: 'Name', value: `${config.workloadName}-eip` },
       ]),
     });
     this.publicIp = eip.attrPublicIp;
@@ -165,7 +165,7 @@ export class ValheimServer extends Construct {
       },
       subnetId: subnet.subnetId,
       tags: Object.entries(config.tags).map(([key, value]) => ({ key, value })).concat([
-        { key: 'Name', value: `${config.workloadName}-${config.server.name}` },
+        { key: 'Name', value: config.workloadName },
       ]),
     });
 
