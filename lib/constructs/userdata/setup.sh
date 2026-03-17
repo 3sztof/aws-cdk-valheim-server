@@ -80,6 +80,12 @@ VALHEIM_LOG_FILTER_CONTAINS_Spawned=Got character ZDOID from
 ON_VALHEIM_LOG_FILTER_CONTAINS_Spawned={ read l; if echo "\$l" | grep -q ": 0:0"; then name=\${l//*ZDOID from /}; name=\${name// :*/}; msg="💀 \$name died"; else name=\${l//*ZDOID from /}; name=\${name// :*/}; msg="⚔ \$name joined the server"; fi; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"${SERVER_NAME}\",\"content\":\"\$msg\"}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
 VALHEIM_LOG_FILTER_CONTAINS_Raid=Random event set:
 ON_VALHEIM_LOG_FILTER_CONTAINS_Raid={ read l; event=\${l//*Random event set:/}; event=\${event%% *}; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"${SERVER_NAME}\",\"embeds\":[{\"title\":\"🚨 Raid!\",\"description\":\"Event: \$event\",\"color\":15158332}]}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
+VALHEIM_LOG_FILTER_CONTAINS_PlayerLeft=Player connection lost server
+ON_VALHEIM_LOG_FILTER_CONTAINS_PlayerLeft={ read l; cnt=\${l//*now /}; cnt=\${cnt%% *}; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"${SERVER_NAME}\",\"content\":\"🚪 A player left. \$cnt player(s) remaining.\"}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
+VALHEIM_LOG_FILTER_CONTAINS_WorldSaved=World saved (
+ON_VALHEIM_LOG_FILTER_CONTAINS_WorldSaved={ read l; ms=\${l//*World saved (/}; ms=\${ms%%)*}; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"${SERVER_NAME}\",\"content\":\"💾 World saved in \$ms\"}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
+VALHEIM_LOG_FILTER_CONTAINS_Updated=Valheim Server updated
+ON_VALHEIM_LOG_FILTER_CONTAINS_Updated={ read l; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"${SERVER_NAME}\",\"embeds\":[{\"title\":\"🔄 Server Updated\",\"description\":\"Valheim server was updated and restarted.\",\"color\":3447003}]}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
 ENVEOF
 
 # start.sh uses CONTAINER_NAME from env.sh so that it stays correct after
