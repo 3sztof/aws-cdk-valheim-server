@@ -190,10 +190,25 @@ export class ServerControl extends Construct {
     // When no custom domain is configured, backfill CONTROL_BASE_URL with the
     // API Gateway URL now that this.api exists. The env var was initialised to
     // '' above because the API hadn't been created yet at that point.
+    //
+    // IMPORTANT: do NOT use this.api.url here. That property resolves via the
+    // deployment stage token, which creates a circular dependency:
+    //   Lambda env var -> API stage -> Lambda integration -> Lambda
+    // Similarly, this.api.deploymentStage.stageName is an attribute of the
+    // Stage resource, which depends on the Deployment, which depends on all
+    // method integrations, which depend on the Lambda - same cycle.
+    // Solution: hardcode the stage name ('prod' is set explicitly above) so
+    // the URL is built entirely from refs that have no back-edge to Lambda.
     if (!config.domain?.enabled) {
       this.controlFunction.addEnvironment(
         'CONTROL_BASE_URL',
-        `${this.api.url}server/`,
+        cdk.Fn.join('', [
+          'https://',
+          this.api.restApiId,
+          '.execute-api.',
+          cdk.Aws.REGION,
+          '.amazonaws.com/prod/server/',
+        ]),
       );
     }
 
