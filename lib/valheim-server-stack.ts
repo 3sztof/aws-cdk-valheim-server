@@ -46,8 +46,11 @@ export class ValheimServerStack extends cdk.Stack {
     // CfnResourceAssociation alone does NOT auto-propagate this tag - it must be
     // applied explicitly. This tag is what makes resources visible under the
     // application in the AWS Console myApplications view and Cost Explorer.
+    // NOTE: attrApplicationTagKey is always the literal string "awsApplication"
+    // (documented by AWS). We cannot use it as a Tags.of() key directly because
+    // CDK resolves tag keys at synth time and rejects CFN tokens there.
     cdk.Tags.of(this).add(
-      appRegistryApp.attrApplicationTagKey,
+      'awsApplication',
       appRegistryApp.attrApplicationTagValue,
     );
 
