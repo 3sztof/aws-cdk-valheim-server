@@ -35,19 +35,17 @@ export class ValheimServerStack extends cdk.Stack {
       },
     });
 
-    // Explicitly apply the awsApplication tag to all resources in this stack.
-    // This is what makes resources visible under the application in the AWS
-    // Console myApplications view and Cost Explorer.
-    // NOTE: attrApplicationTagKey is always the literal string "awsApplication"
-    // (documented by AWS). We use the literal to avoid CDK rejecting a CFN token
-    // as a tag key at synth time.
-    // NOTE: CfnResourceAssociation(CFN_STACK) is intentionally omitted - it
-    // creates a circular dependency (resource references this.stackId which
-    // depends on the stack being fully resolved). Tag propagation via Tags.of()
-    // is sufficient for myApplications and Cost Explorer visibility.
+    // Explicitly apply the awsApplication tag to all resources in this stack
+    // so they appear under the application in the AWS Console myApplications
+    // view and Cost Explorer.
+    // NOTE: attrApplicationTagKey is always the literal string "awsApplication".
+    // NOTE: The AppRegistryApplication resource itself is excluded to avoid a
+    // self-referential circular dependency (the resource would carry a tag whose
+    // value is its own Fn::GetAtt output, which CloudFormation rejects).
     cdk.Tags.of(this).add(
       'awsApplication',
       appRegistryApp.attrApplicationTagValue,
+      { excludeResourceTypes: ['AWS::ServiceCatalogAppRegistry::Application'] },
     );
 
     const vpc = new ec2.Vpc(this, 'Vpc', {
