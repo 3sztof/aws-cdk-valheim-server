@@ -2,7 +2,7 @@
 set -euo pipefail
 
 exec > >(tee /var/log/userdata.log) 2>&1
-echo "Starting Valheim server setup at $(date)"
+echo "Starting ${WORKLOAD_NAME} server setup at $(date)"
 
 export VALHEIM_SERVER_NAME="${SERVER_NAME}"
 export VALHEIM_WORLD="${WORLD_NAME}"
@@ -16,9 +16,10 @@ export S3_BACKUP_BUCKET="${BACKUP_BUCKET}"
 export DISCORD_WEBHOOK_PARAM="${DISCORD_WEBHOOK_PARAM}"
 export BACKUP_CRON="${BACKUP_CRON}"
 export CONTROL_BASE_URL="${CONTROL_BASE_URL}"
+export CONTAINER_NAME="${WORKLOAD_NAME}"
 
 dnf update -y
-dnf install -y docker jq
+dnf install -y docker jq unzip
 
 systemctl enable docker
 systemctl start docker
@@ -48,6 +49,7 @@ cat > /opt/valheim/env.sh << ENVFILE
 export S3_BACKUP_BUCKET="${BACKUP_BUCKET}"
 export DISCORD_WEBHOOK_PARAM="${DISCORD_WEBHOOK_PARAM}"
 export VALHEIM_SERVER_NAME="${SERVER_NAME}"
+export CONTAINER_NAME="${WORKLOAD_NAME}"
 ENVFILE
 
 # Write valheim.env - ALL container env vars go here
@@ -72,21 +74,24 @@ BACKUPS_IF_IDLE=true
 BACKUPS_ZIP=true
 POST_BOOTSTRAP_HOOK=apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install awscli
 POST_BACKUP_HOOK=aws s3 cp @BACKUP_FILE@ s3://${S3_BACKUP_BUCKET}/backups/
-POST_SERVER_LISTENING_HOOK=curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"Valheim\",\"embeds\":[{\"title\":\"✅ ${SERVER_NAME} is Online\",\"description\":\"Server is ready! Connect to ${PUBLIC_IP}:2456\\n\\n▶ Start: ${CONTROL_BASE_URL}start\\n⏹ Stop: ${CONTROL_BASE_URL}stop\\n🔎 Status: ${CONTROL_BASE_URL}status\",\"color\":3066993}]}" "\$DISCORD_WEBHOOK" 2>/dev/null || true
-PRE_SERVER_SHUTDOWN_HOOK=curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"Valheim\",\"embeds\":[{\"title\":\"🔴 ${SERVER_NAME} is Offline\",\"description\":\"Server is shutting down.\\n\\n▶ Start: ${CONTROL_BASE_URL}start\",\"color\":15158332}]}" "\$DISCORD_WEBHOOK" 2>/dev/null || true
+POST_SERVER_LISTENING_HOOK=curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"${SERVER_NAME}\",\"embeds\":[{\"title\":\"✅ ${SERVER_NAME} is Online\",\"description\":\"Server is ready! Connect to ${PUBLIC_IP}:2456\\n\\n▶ Start: ${CONTROL_BASE_URL}start\\n⏹ Stop: ${CONTROL_BASE_URL}stop\\n🔎 Status: ${CONTROL_BASE_URL}status\",\"color\":3066993}]}" "\$DISCORD_WEBHOOK" 2>/dev/null || true
+PRE_SERVER_SHUTDOWN_HOOK=/usr/local/bin/valheim-backup 2>/dev/null || true; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"${SERVER_NAME}\",\"embeds\":[{\"title\":\"🔴 ${SERVER_NAME} is Offline\",\"description\":\"Server is shutting down.\\n\\n▶ Start: ${CONTROL_BASE_URL}start\",\"color\":15158332}]}" "\$DISCORD_WEBHOOK" 2>/dev/null || true
 VALHEIM_LOG_FILTER_CONTAINS_Spawned=Got character ZDOID from
-ON_VALHEIM_LOG_FILTER_CONTAINS_Spawned={ read l; if echo "\$l" | grep -q ": 0:0"; then name=\${l//*ZDOID from /}; name=\${name// :*/}; msg="💀 \$name died"; else name=\${l//*ZDOID from /}; name=\${name// :*/}; msg="⚔ \$name joined the server"; fi; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"Valheim\",\"content\":\"\$msg\"}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
+ON_VALHEIM_LOG_FILTER_CONTAINS_Spawned={ read l; if echo "\$l" | grep -q ": 0:0"; then name=\${l//*ZDOID from /}; name=\${name// :*/}; msg="💀 \$name died"; else name=\${l//*ZDOID from /}; name=\${name// :*/}; msg="⚔ \$name joined the server"; fi; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"${SERVER_NAME}\",\"content\":\"\$msg\"}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
 VALHEIM_LOG_FILTER_CONTAINS_Raid=Random event set:
-ON_VALHEIM_LOG_FILTER_CONTAINS_Raid={ read l; event=\${l//*Random event set:/}; event=\${event%% *}; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"Valheim\",\"embeds\":[{\"title\":\"🚨 Raid!\",\"description\":\"Event: \$event\",\"color\":15158332}]}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
+ON_VALHEIM_LOG_FILTER_CONTAINS_Raid={ read l; event=\${l//*Random event set:/}; event=\${event%% *}; curl -sfSL -X POST -H "Content-Type: application/json" -d "{\"username\":\"${SERVER_NAME}\",\"embeds\":[{\"title\":\"🚨 Raid!\",\"description\":\"Event: \$event\",\"color\":15158332}]}" "\$DISCORD_WEBHOOK" 2>/dev/null; }
 ENVEOF
 
+# start.sh uses CONTAINER_NAME from env.sh so that it stays correct after
+# redeployments that might change the workload name.
 cat > /opt/valheim/start.sh << 'STARTSH'
 #!/bin/bash
+source /opt/valheim/env.sh 2>/dev/null || true
 # Fetch Discord webhook fresh from SSM so URL changes take effect without redeployment.
 DISCORD_WEBHOOK=$(/opt/valheim/get-discord-webhook.sh)
-docker rm -f valheim 2>/dev/null || true
+docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
 exec docker run -d \
-  --name valheim \
+  --name "${CONTAINER_NAME}" \
   --cap-add=sys_nice \
   --stop-timeout 120 \
   --restart unless-stopped \
@@ -101,8 +106,9 @@ chmod +x /opt/valheim/start.sh
 
 cat > /opt/valheim/stop.sh << 'STOPSH'
 #!/bin/bash
-docker stop -t 120 valheim 2>/dev/null
-docker rm valheim 2>/dev/null
+source /opt/valheim/env.sh 2>/dev/null || true
+docker stop -t 120 "${CONTAINER_NAME}" 2>/dev/null
+docker rm "${CONTAINER_NAME}" 2>/dev/null
 STOPSH
 chmod +x /opt/valheim/stop.sh
 
@@ -144,7 +150,6 @@ if [ -n "${S3_BACKUP_BUCKET:-}" ]; then
     if [ -n "$LATEST_BACKUP" ]; then
         echo "Restoring from latest backup: $LATEST_BACKUP"
         aws s3 cp "s3://$S3_BACKUP_BUCKET/backups/$LATEST_BACKUP" /tmp/latest-backup.zip
-        dnf install -y unzip
         unzip -o /tmp/latest-backup.zip -d /tmp/backup-extract
         if [ -d /tmp/backup-extract/config/worlds_local ]; then
             cp -a /tmp/backup-extract/config/worlds_local/* /opt/valheim/saves/worlds_local/ 2>/dev/null || true
@@ -156,9 +161,11 @@ fi
 cd /opt/valheim
 /opt/valheim/start.sh
 
-cat > /etc/systemd/system/valheim.service << 'SERVICE'
+# Systemd service name is also driven by the workload name set at deploy time.
+SERVICE_NAME="${WORKLOAD_NAME}"
+cat > /etc/systemd/system/${SERVICE_NAME}.service << SERVICEEOF
 [Unit]
-Description=Valheim Dedicated Server
+Description=${WORKLOAD_NAME} dedicated server
 After=docker.service
 Requires=docker.service
 
@@ -170,9 +177,9 @@ ExecStop=/opt/valheim/stop.sh
 
 [Install]
 WantedBy=multi-user.target
-SERVICE
+SERVICEEOF
 
 systemctl daemon-reload
-systemctl enable valheim.service
+systemctl enable ${SERVICE_NAME}.service
 
-echo "Valheim server setup completed at $(date)"
+echo "${WORKLOAD_NAME} server setup completed at $(date)"
