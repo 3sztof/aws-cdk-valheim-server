@@ -91,7 +91,8 @@ export class ServerControl extends Construct {
         DISCORD_WEBHOOK_PARAM: config.discord.enabled ? config.discord.webhookParameterName : '',
         NOTIFY_ON_START: config.discord.notifyOnStart ? 'true' : 'false',
         NOTIFY_ON_STOP: config.discord.notifyOnStop ? 'true' : 'false',
-        // Set after setupCustomDomain() runs; empty string when domain is not configured.
+        // Fallback set below via addEnvironment() once this.api is created.
+        // Set after setupCustomDomain() runs; empty string triggers addEnvironment override.
         CONTROL_BASE_URL: config.domain?.enabled
           ? `https://${config.domain.subdomain ? config.domain.subdomain + '.' : ''}${config.domain.hostedZoneName}/server/`
           : '',
@@ -185,6 +186,16 @@ export class ServerControl extends Construct {
       value: this.api.url,
       description: 'Server control API URL',
     });
+
+    // When no custom domain is configured, backfill CONTROL_BASE_URL with the
+    // API Gateway URL now that this.api exists. The env var was initialised to
+    // '' above because the API hadn't been created yet at that point.
+    if (!config.domain?.enabled) {
+      this.controlFunction.addEnvironment(
+        'CONTROL_BASE_URL',
+        `${this.api.url}server/`,
+      );
+    }
 
     if (config.domain?.enabled) {
       this.setupCustomDomain(config);
